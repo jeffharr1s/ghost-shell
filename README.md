@@ -39,7 +39,7 @@ Ghost-Shell watches your screen, finds the chessboard, thinks with Stockfish, th
 ## Install
 
 ```bash
-git clone https://github.com/yourusername/ghost-shell.git
+git clone https://github.com/zoecyber001/ghost-shell.git
 cd ghost-shell
 pip install -r requirements.txt
 ```
