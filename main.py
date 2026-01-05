@@ -161,7 +161,7 @@ class GhostShell:
                 self.prev_map = self.vision.get_board_piece_map()  # Update prev_map after our move
                     
                     # log the move made
-            self.logger.success(f"Played: {best_move_uci}")                
+                    self.logger.success(f"Played: {best_move_uci}")                
             else:
                 self.logger.warning("Opponent's turn.")
                 print(f"\n{self.board}")
