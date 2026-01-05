@@ -118,11 +118,11 @@ class GhostShell:
                 if move:
                     try:
                         self.board.push_uci(move)
-                    self.prev_map = self.vision.get_board_piece_map()  # Initialize prev_map
-
+                        self.prev_map = self.vision.get_board_piece_map()  # Initialize prev_map
+                        break
                     except ValueError:
                         self.logger.error(f"Invalid move: {move}")
-                break
+             
         # Initialize prev_map for board state tracking
         if not hasattr(self, 'prev_map'):
             self.prev_map = self.vision.get_board_piece_map()
