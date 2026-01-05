@@ -119,10 +119,11 @@ class GhostShell:
                     try:
                         self.board.push_uci(move)
                     self.prev_map = self.vision.get_board_piece_map()  # Initialize prev_map
-                                            break
+
                     except ValueError:
                         self.logger.error(f"Invalid move: {move}")
                         print(f"Legal moves: {', '.join([m.uci() for m in list(self.board.legal_moves)[:10]])}...")
+                    break
         # Initialize prev_map for board state tracking
         if not hasattr(self, 'prev_map'):
             self.prev_map = self.vision.get_board_piece_map()
