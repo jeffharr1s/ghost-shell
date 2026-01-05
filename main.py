@@ -1,3 +1,4 @@
+122
 import time
 import random
 import cv2
@@ -122,7 +123,7 @@ class GhostShell:
 
                     except ValueError:
                         self.logger.error(f"Invalid move: {move}")
-                                        break
+                                    break
         # Initialize prev_map for board state tracking
         if not hasattr(self, 'prev_map'):
             self.prev_map = self.vision.get_board_piece_map()
