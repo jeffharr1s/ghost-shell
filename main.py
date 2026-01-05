@@ -118,10 +118,14 @@ class GhostShell:
                 if move:
                     try:
                         self.board.push_uci(move)
+                    self.prev_map = self.vision.get_board_piece_map()  # Initialize prev_map
                         break
                     except ValueError:
                         self.logger.error(f"Invalid move: {move}")
                         print(f"Legal moves: {', '.join([m.uci() for m in list(self.board.legal_moves)[:10]])}...")
+        # Initialize prev_map for board state tracking
+        if not hasattr(self, 'prev_map'):
+            self.prev_map = self.vision.get_board_piece_map()
         
         while not self.board.is_game_over():
             
@@ -154,6 +158,7 @@ class GhostShell:
                     self.humanizer.make_move(start_coords, end_coords, promotion_piece, sq_size, is_white)
                     self.overlay.clear()
                     self.board.push_uci(best_move_uci)
+                self.prev_map = self.vision.get_board_piece_map()  # Update prev_map after our move
                     
                     # log the move made
                     self.logger.success(f"Played: {best_move_uci}")
@@ -167,18 +172,33 @@ class GhostShell:
                 
                 if detected is None:
                     break
-                elif detected:
-                    self.logger.log("Movement detected! Enter the move.")
-                    
-                    while True:
+elif detected:
+                # Try auto-detecting the move
+                uci_move = None
+                for attempt in range(10):  # retry a few times
+                    prev_map = self.vision.get_board_piece_map() if not hasattr(self, 'prev_map') else self.prev_map
+                    uci_move = self.vision.detect_opponent_move_uci(prev_map)
+                    if uci_move:
+                        self.logger.success(f"Auto-detected move: {uci_move}")
+                        break
+                    time.sleep(0.3)
+                
+                # Fallback to manual input if auto-detection fails
+                if not uci_move:
+                    self.logger.log("Movement detected! Enter the move.")\n                    
+                while True:
+                    if not uci_move:
                         move = input("Opponent's move (e.g. e7e5): ").strip().lower()
-                        try:
-                            self.board.push_uci(move)
-                            break
-                        except ValueError:
-                            self.logger.error(f"Invalid move: {move}")
-                            print(f"Legal moves: {', '.join([m.uci() for m in list(self.board.legal_moves)[:10]])}...")
-
+                    else:
+                        move = uci_move
+                    try:
+                        self.board.push_uci(move)
+                        self.prev_map = self.vision.get_board_piece_map()  # Update prev_map
+                        break
+                    except ValueError:
+                        self.logger.error(f"Invalid move: {move}")
+                        print(f"Legal moves: {', '.join([m.uci() for m in list(self.board.legal_moves)[:10]])}...")
+                        uci_move = None  # Reset so user can input manually
         self.logger.success("Game Over.")
 
 if __name__ == "__main__":
