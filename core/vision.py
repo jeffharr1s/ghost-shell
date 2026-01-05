@@ -240,3 +240,99 @@ if __name__ == "__main__":
         vision.debug_draw_board()
     else:
         print("Failed to detect. Run debug to see what it sees.")
+
+    def get_board_piece_map(self):
+        """
+        Capture the current board region and return a mapping
+        {(file, rank): piece_code}.
+        Returns dict like {('e', 2): 'wp', ('g', 8): 'bn', ...}
+        """
+        import chess
+        
+        if not self.board_location:
+            return {}
+        
+        frame = self.capture_screen()
+        bx, by, bw, bh = self.board_location
+        sq_size = int(self.square_size)
+        
+        piece_map = {}
+        
+        # Sample each square and try to detect if there's a piece
+        for rank_idx in range(8):  # 0..7 from top to bottom
+            for file_idx in range(8):  # 0..7 from left to right
+                x1 = bx + file_idx * sq_size
+                y1 = by + rank_idx * sq_size
+                x2 = x1 + sq_size
+                y2 = y1 + sq_size
+                
+                cell_img = frame[y1:y2, x1:x2]
+                
+                # Simple piece detection: check if square is darker than background
+                # This is very basic - in reality you'd use template matching or ML
+                gray_cell = cv2.cvtColor(cell_img, cv2.COLOR_BGR2GRAY)
+                avg_brightness = np.mean(gray_cell)
+                
+                # If significantly darker, assume there's a piece
+                # You should improve this with actual piece classification
+                if avg_brightness < 100:  # arbitrary threshold
+                    file = chess.FILE_NAMES[file_idx]
+                    rank = 8 - rank_idx  # flip: rank 8 at top, 1 at bottom for white
+                    # Store as generic piece for now
+                    piece_map[(file, rank)] = 'piece'
+        
+        return piece_map
+
+    def detect_move_from_maps(self, prev_map, curr_map):
+        """
+        Compare two piece maps and infer the move that was made.
+        Returns tuple (from_square, to_square) like (('e', 2), ('e', 4))
+        or None if no clear move detected.
+        """
+        # Find removed and added pieces
+        removed = {}
+        added = {}
+        
+        for sq, p in prev_map.items():
+            if sq not in curr_map:
+                removed[sq] = p
+        
+        for sq, p in curr_map.items():
+            if sq not in prev_map:
+                added[sq] = p
+        
+        # Simple case: one from, one to
+        if len(removed) == 1 and len(added) == 1:
+            from_sq = list(removed.keys())[0]
+            to_sq = list(added.keys())[0]
+            return (from_sq, to_sq)
+        
+        # Capture: one piece disappears, one moves to target
+        if len(removed) == 2 and len(added) == 1:
+            to_sq = list(added.keys())[0]
+            # The from_sq is whichever removed square isn't the to_sq
+            for sq in removed.keys():
+                if sq != to_sq:
+                    return (sq, to_sq)
+        
+        return None
+
+    @staticmethod
+    def square_to_uci(square):
+        """Convert (file, rank) tuple to UCI string like 'e2'"""
+        file, rank = square
+        return f"{file}{rank}"
+
+    def detect_opponent_move_uci(self, prev_map):
+        """
+        Detect opponent's move by comparing previous board state to current.
+        Returns UCI move string like 'e2e4' or None if no move detected.
+        """
+        curr_map = self.get_board_piece_map()
+        move = self.detect_move_from_maps(prev_map, curr_map)
+        
+        if not move:
+            return None
+        
+        from_sq, to_sq = move
+        return self.square_to_uci(from_sq) + self.square_to_uci(to_sq)
