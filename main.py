@@ -1,4 +1,3 @@
-122
 import time
 import random
 import cv2
