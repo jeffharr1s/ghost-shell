@@ -1,7 +1,8 @@
 import cv2
-import numpy as np
 import mss
+import numpy as np
 import time
+import chess
 from utils.logger import Logger 
 
 class GhostVision:
@@ -164,8 +165,6 @@ class GhostVision:
     
     def detect_player_side(self):
         """figures out if youre white or black by checking corner brightness"""
-        import chess
-        
         if not self.board_location:
             self.logger.error("Find the board first.")
             return None
@@ -235,8 +234,6 @@ class GhostVision:
         Advanced piece detection using multiple methods with DEBUG logging.
         Returns True if a piece is likely present.
         """
-        import chess
-        
         if cell_img.size == 0:
             return False
         
@@ -285,9 +282,8 @@ class GhostVision:
         {(file, rank): piece_code}.
         Uses advanced edge detection and variance analysis.
         """
-        import chess
-        
         if not self.board_location:
+            self.logger.error("Board not locked. Run find_board() first.")
             return {}
         
         self.logger.log("=== DETECTING PIECES ===")
@@ -364,6 +360,10 @@ class GhostVision:
         Returns UCI move string like 'e2e4' or None if no move detected.
         """
         curr_map = self.get_board_piece_map()
+        if not curr_map:
+            self.logger.error("Could not detect pieces on the current frame.")
+            return None
+
         move = self.detect_move_from_maps(prev_map, curr_map)
         
         if not move:
