@@ -7,7 +7,7 @@ from utils.logger import Logger
 class GhostVision:
     def __init__(self):
         self.sct = mss.mss()
-        [0]  # Full virtual screen for absolute coordinates
+        self.monitor = self.sct.monitors[0]  # Full virtual screen for absolute coordinates
         self.board_location = None
         self.square_size = 0
         self.logger = Logger("VISION")
