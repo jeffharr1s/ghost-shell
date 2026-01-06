@@ -58,16 +58,23 @@ class Humanizer:
         pyautogui.mouseUp()
 
     def make_move(self, start_coords, end_coords, promotion_piece=None, square_size=None, player_is_white=True):
-        """click piece, drag to square, handle promotion if needed"""
+        """DRAG piece to square (Lichess requires drag-and-drop)"""
         self.logger.log("Making move...")
         
+        # Move to starting square
         self.move_mouse(*start_coords)
-        self.click()
+        time.sleep(random.uniform(0.05, 0.1))
         
-        time.sleep(random.uniform(0.1, 0.3))
+        # Press and hold mouse button (pick up piece)
+        pyautogui.mouseDown()
+        time.sleep(random.uniform(0.1, 0.2))
         
+        # Drag to destination
         self.move_mouse(*end_coords)
-        self.click()
+        time.sleep(random.uniform(0.1, 0.2))
+        
+        # Release mouse button (drop piece)
+        pyautogui.mouseUp()
         
         if promotion_piece:
             time.sleep(random.uniform(0.2, 0.4))
