@@ -10,8 +10,7 @@ class GhostVision:
         self.monitor = self.sct.monitors[0]  # Full virtual screen for absolute coordinates        self.board_location = None
         self.square_size = 0
         self.logger = Logger("VISION")
-                self.monitor1_width = 3840  # Width of Monitor 1 (left 4K display)
-
+        self.monitor1_width = 3840  # Width of Monitor 1 (left 4K display)
     def capture_screen(self):
         img = np.array(self.sct.grab(self.monitor))
         return cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
