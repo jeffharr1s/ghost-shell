@@ -276,7 +276,7 @@ class GhostVision:
             self.logger.error(f"Detection error at {file_idx},{rank_idx}: {e}")
             return False
 
-    def get_board_piece_map(self):
+    def get_board_piece_map(self, sample_count: int = 3, sample_delay: float = 0.05):
         """
         Capture the current board region and return a mapping
         {(file, rank): piece_code}.
@@ -286,33 +286,56 @@ class GhostVision:
             self.logger.error("Board not locked. Run find_board() first.")
             return {}
         
-        self.logger.log("=== DETECTING PIECES ===")
-        frame = self.capture_screen()
+        sample_count = max(1, sample_count)
+        self.logger.log(f"=== DETECTING PIECES ({sample_count} sample(s)) ===")
+
         bx, by, bw, bh = self.board_location
         sq_size = int(self.square_size)
-        
-        piece_map = {}
-        
-        # Sample each square and try to detect if there's a piece
-        for rank_idx in range(8):  # 0..7 from top to bottom
-            for file_idx in range(8):  # 0..7 from left to right
-                x1 = bx + file_idx * sq_size
-                y1 = by + rank_idx * sq_size
-                x2 = x1 + sq_size
-                y2 = y1 + sq_size
-                
-                cell_img = frame[y1:y2, x1:x2]
-                
-                # Use advanced piece detection
-                has_piece = self._detect_piece_in_square(cell_img, rank_idx, file_idx)
-                
-                if has_piece:
-                    file = chess.FILE_NAMES[file_idx]
-                    rank = 8 - rank_idx  # flip: rank 8 at top, 1 at bottom for white
-                    piece_map[(file, rank)] = 'piece'
-        
-        self.logger.log(f"=== DETECTED {len(piece_map)} PIECES ===")
-        return piece_map
+
+        all_maps = []
+        for idx in range(sample_count):
+            frame = self.capture_screen()
+            piece_map = {}
+
+            # Sample each square and try to detect if there's a piece
+            for rank_idx in range(8):  # 0..7 from top to bottom
+                for file_idx in range(8):  # 0..7 from left to right
+                    x1 = bx + file_idx * sq_size
+                    y1 = by + rank_idx * sq_size
+                    x2 = x1 + sq_size
+                    y2 = y1 + sq_size
+                    
+                    cell_img = frame[y1:y2, x1:x2]
+                    
+                    # Use advanced piece detection
+                    has_piece = self._detect_piece_in_square(cell_img, rank_idx, file_idx)
+                    
+                    if has_piece:
+                        file = chess.FILE_NAMES[file_idx]
+                        rank = 8 - rank_idx  # flip: rank 8 at top, 1 at bottom for white
+                        piece_map[(file, rank)] = 'piece'
+
+            all_maps.append(piece_map)
+            if idx < sample_count - 1:
+                time.sleep(sample_delay)
+
+        # Majority vote across samples to reduce noise
+        if sample_count == 1:
+            final_map = all_maps[0]
+        else:
+            vote_counts = {}
+            for piece_map in all_maps:
+                for square in piece_map.keys():
+                    vote_counts[square] = vote_counts.get(square, 0) + 1
+
+            majority = (sample_count // 2) + 1
+            final_map = {sq: 'piece' for sq, count in vote_counts.items() if count >= majority}
+
+        self.logger.log(f"=== DETECTED {len(final_map)} PIECES AFTER VOTING ===")
+        if not final_map:
+            self.logger.warning("No pieces detected; check thresholds or board alignment.")
+
+        return final_map
 
     def detect_move_from_maps(self, prev_map, curr_map):
         """
@@ -354,12 +377,12 @@ class GhostVision:
         file, rank = square
         return f"{file}{rank}"
 
-    def detect_opponent_move_uci(self, prev_map):
+    def detect_opponent_move_uci(self, prev_map, sample_count: int = 3):
         """
         Detect opponent's move by comparing previous board state to current.
         Returns UCI move string like 'e2e4' or None if no move detected.
         """
-        curr_map = self.get_board_piece_map()
+        curr_map = self.get_board_piece_map(sample_count=sample_count)
         if not curr_map:
             self.logger.error("Could not detect pieces on the current frame.")
             return None
