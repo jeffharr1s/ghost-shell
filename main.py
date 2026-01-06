@@ -135,14 +135,14 @@ class GhostShell:
                 if move:
                     try:
                         self.board.push_uci(move)
-                        self.vision.get_board_piece_map()  # TODO: Implement get_board_piece_map  # Initialize prev_map
+                        self.prev_map = self.vision.get_board_piece_map()  # Initialize prev_map
                         break
                     except ValueError:
                         self.logger.error(f"Invalid move: {move}")
              
         # Initialize prev_map for board state tracking
         if not hasattr(self, 'prev_map'):
-            self.vision.get_board_piece_map()  # TODO: Implement get_board_piece_map
+            self.prev_map = self.vision.get_board_piece_map()
         
         while not self.board.is_game_over():
             
@@ -175,7 +175,7 @@ class GhostShell:
                     self.humanizer.make_move(start_coords, end_coords, promotion_piece, sq_size, is_white)
                     self.overlay.clear()
                     self.board.push_uci(best_move_uci)
-                    self.vision.get_board_piece_map()  # TODO: Implement get_board_piece_map  # Update prev_map after our move
+                    self.prev_map = self.vision.get_board_piece_map()  # Update prev_map after our move
                     
                     # log the move made
                     self.logger.success(f"Played: {best_move_uci}")                
@@ -192,7 +192,7 @@ class GhostShell:
                     # Try auto-detecting the move
                     uci_move = None
                     for attempt in range(10):  # retry a few times
-                        prev_map = self.prev_map if hasattr(self, 'prev_map') else {}: Implement get_board_piece_map if not hasattr(self, 'prev_map') else self.prev_map
+                        prev_map = self.prev_map if hasattr(self, 'prev_map') else {}
                         uci_move = self.vision.detect_opponent_move_uci(prev_map)
                         if uci_move:
                             self.logger.success(f"Auto-detected move: {uci_move}")
@@ -210,7 +210,7 @@ class GhostShell:
                             move = uci_move
                         try:
                             self.board.push_uci(move)
-                            self.vision.get_board_piece_map()  # TODO: Implement get_board_piece_map  # Update prev_map
+                            self.prev_map = self.vision.get_board_piece_map()  # Update prev_map
                             break
                         except ValueError:
                             self.logger.error(f"Invalid move: {move}")
