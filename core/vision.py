@@ -364,4 +364,23 @@ class GhostVision:
         Returns UCI move string like 'e2e4' or None if no move detected.
         """
         curr_map = self.get_board_piece_map()
-        move = self.detect_move_from_maps(
+        move = self.detect_move_from_maps(prev_map, curr_map)
+        
+        if not move:
+            return None
+        
+        from_sq, to_sq = move
+        return self.square_to_uci(from_sq) + self.square_to_uci(to_sq)
+
+
+if __name__ == "__main__":
+    vision = GhostVision()
+    print("Open a chess board in 3 seconds...")
+    time.sleep(3)
+    
+    loc = vision.find_board()
+    if loc:
+        print(f"Board at: {loc}")
+        vision.debug_draw_board()
+    else:
+        print("Failed to detect. Run debug to see what it sees.")
