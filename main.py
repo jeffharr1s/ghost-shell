@@ -4,6 +4,8 @@ import cv2
 import chess
 import keyboard
 import numpy as np
+import ctypes
+import sys
 from core.vision import GhostVision
 from core.engine import GhostEngine
 from core.humanizer import Humanizer
@@ -78,6 +80,21 @@ class GhostShell:
         print("  [B] Black (opponent moves first)")
         print("  [A] Auto-detect (may not be accurate)")
         print("="*50)
+        
+        # Bring console window to foreground on Windows
+        if sys.platform == 'win32':
+            try:
+                kernel32 = ctypes.windll.kernel32
+                user32 = ctypes.windll.user32
+                hwnd = kernel32.GetConsoleWindow()
+                if hwnd:
+                    user32.SetForegroundWindow(hwnd)
+                    user32.SetFocus(hwnd)
+            except Exception:
+                pass  # Silently fail if can't set focus
+        
+        # Make a beep sound to alert user
+        print('\a')
         
         side_input = input("Enter W/B/A: ").strip().upper()
         
