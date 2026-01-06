@@ -7,7 +7,7 @@ from utils.logger import Logger
 class GhostVision:
     def __init__(self):
         self.sct = mss.mss()
-        self.monitor = self.sct.monitors[0]
+        self.monitor = self.sct.monitors[1]
         self.board_location = None
         self.square_size = 0
         self.logger = Logger("VISION")
