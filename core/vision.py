@@ -230,11 +230,46 @@ class GhostVision:
         cv2.imwrite("debug_vision.jpg", img)
         print("Saved debug_vision.jpg - check if grid aligns")
 
+    def _detect_piece_in_square(self, cell_img, rank_idx, file_idx):
+        """
+        Advanced piece detection using multiple methods.
+        Returns True if a piece is likely present.
+        """
+        if cell_img.size == 0:
+            return False
+        
+        try:
+            # Method 1: Edge detection
+            gray = cv2.cvtColor(cell_img, cv2.COLOR_BGR2GRAY)
+            edges = cv2.Canny(gray, 30, 100)
+            edge_density = np.count_nonzero(edges) / edges.size
+            
+            # Method 2: Standard deviation (variance)
+            std_dev = np.std(gray)
+            
+            # Method 3: Contrast analysis
+            min_val = np.min(gray)
+            max_val = np.max(gray)
+            contrast = max_val - min_val
+            
+            # Thresholds (tune these based on your chess site)
+            has_edges = edge_density > 0.04  # Pieces have edges
+            has_variance = std_dev > 12  # Pieces have texture
+            has_contrast = contrast > 30  # Pieces have depth/shading
+            
+            # Combine methods: need at least 2 of 3 indicators
+            detection_score = sum([has_edges, has_variance, has_contrast])
+            
+            return detection_score >= 2
+            
+        except Exception:
+            return False
+
     def get_board_piece_map(self):
         """
         Capture the current board region and return a mapping
         {(file, rank): piece_code}.
-        Returns dict like {('e', 2): 'wp', ('g', 8): 'bn', ...}
+        Uses advanced edge detection and variance analysis.
         """
         import chess
         
@@ -257,17 +292,12 @@ class GhostVision:
                 
                 cell_img = frame[y1:y2, x1:x2]
                 
-                # Simple piece detection: check if square is darker than background
-                # This is very basic - in reality you'd use template matching or ML
-                gray_cell = cv2.cvtColor(cell_img, cv2.COLOR_BGR2GRAY)
-                avg_brightness = np.mean(gray_cell)
+                # Use advanced piece detection
+                has_piece = self._detect_piece_in_square(cell_img, rank_idx, file_idx)
                 
-                # If significantly darker, assume there's a piece
-                # You should improve this with actual piece classification
-                if avg_brightness < 100:  # arbitrary threshold
+                if has_piece:
                     file = chess.FILE_NAMES[file_idx]
                     rank = 8 - rank_idx  # flip: rank 8 at top, 1 at bottom for white
-                    # Store as generic piece for now
                     piece_map[(file, rank)] = 'piece'
         
         return piece_map
