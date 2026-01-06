@@ -191,14 +191,12 @@ class GhostShell:
                 elif detected:
                     # Try auto-detecting the move
                     uci_move = None
-                    for attempt in range(10):
-                        prev_map = self.prev_map
+                while True:  # Keep scanning until move is detected                        prev_map = self.prev_map
                         uci_move = self.vision.detect_opponent_move_uci(prev_map)
                         if uci_move:
                             self.logger.success(f"Auto-detected move: {uci_move}")
                             break
-                        time.sleep(0.3)
-                    
+                    time.sleep(1.5)  # Wait longer for move to complete                    
                     # Fallback to manual input if auto-detection fails
                     if not uci_move:
                         self.logger.log("Movement detected! Enter the move.")
