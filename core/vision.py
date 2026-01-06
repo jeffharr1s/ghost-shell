@@ -7,7 +7,7 @@ from utils.logger import Logger
 class GhostVision:
     def __init__(self):
         self.sct = mss.mss()
-        self.monitor = self.sct.monitors[1]  # Full virtual screen for absolute coordinates
+        self.monitor = self.sct.monitors[1]  # Monitor 1 specifically (left 4K display)
         self.board_location = None
         self.square_size = 0
         self.logger = Logger("VISION")
@@ -78,11 +78,6 @@ class GhostVision:
         candidates.sort(key=lambda c: c[4], reverse=True)
         
         for x, y, w, h, _ in candidates[:5]:  # check top 5
-            # FILTER: Only accept boards on Monitor 1 (left monitor, x < 3840)
-            if x > self.monitor1_width:
-                self.logger.log(f"Skipping board at ({x}, {y}) - outside Monitor 1")
-                continue
-                
             # verify its actually a chessboard by checking for alternating colors
             if self._verify_chessboard(frame, x, y, w, h):
                 self.board_location = (x, y, w, h)
