@@ -7,10 +7,12 @@ from utils.logger import Logger
 class GhostVision:
     def __init__(self):
         self.sct = mss.mss()
-        self.monitor = self.sct.monitors[0]  # Full virtual screen for absolute coordinates        self.board_location = None
+        self.monitor = self.sct.monitors[0]  # Full virtual screen for absolute coordinates
+        self.board_location = None
         self.square_size = 0
         self.logger = Logger("VISION")
         self.monitor1_width = 3840  # Width of Monitor 1 (left 4K display)
+
     def capture_screen(self):
         img = np.array(self.sct.grab(self.monitor))
         return cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
@@ -76,11 +78,11 @@ class GhostVision:
         candidates.sort(key=lambda c: c[4], reverse=True)
         
         for x, y, w, h, _ in candidates[:5]:  # check top 5
-                        # FILTER: Only accept boards on Monitor 1 (left monitor, x < 3840)
-                        if x > self.monitor1_width:
-                                            self.logger.log(f"Skipping board at ({x}, {y}) - outside Monitor 1")
-                                            continue
-                            
+            # FILTER: Only accept boards on Monitor 1 (left monitor, x < 3840)
+            if x > self.monitor1_width:
+                self.logger.log(f"Skipping board at ({x}, {y}) - outside Monitor 1")
+                continue
+                
             # verify its actually a chessboard by checking for alternating colors
             if self._verify_chessboard(frame, x, y, w, h):
                 self.board_location = (x, y, w, h)
@@ -341,4 +343,3 @@ if __name__ == "__main__":
         vision.debug_draw_board()
     else:
         print("Failed to detect. Run debug to see what it sees.")
-
