@@ -5,6 +5,11 @@ import time
 import chess
 from utils.logger import Logger 
 
+# Piece detection thresholds (tuned to require clear edges)
+EDGE_MIN = 0.04
+STD_MIN = 14.0
+CONTRAST_MIN = 60.0
+
 class GhostVision:
     def __init__(self):
         self.sct = mss.mss()
@@ -250,15 +255,14 @@ class GhostVision:
             min_val = np.min(gray)
             max_val = np.max(gray)
             contrast = max_val - min_val
-            
+
             # Thresholds (tune these based on your chess site)
-            has_edges = edge_density > 0.04  # Pieces have edges
-            has_variance = std_dev > 12  # Pieces have texture
-            has_contrast = contrast > 30  # Pieces have depth/shading
-            
-            # Combine methods: need at least 2 of 3 indicators
-            detection_score = sum([has_edges, has_variance, has_contrast])
-            result = detection_score >= 2
+            has_edges = edge_density >= EDGE_MIN  # Pieces have edges
+            has_variance = std_dev >= STD_MIN  # Pieces have texture
+            has_contrast = contrast >= CONTRAST_MIN  # Pieces have depth/shading
+
+            # Require edges and at least one of the other signals to cut board texture noise
+            result = has_edges and (has_variance or has_contrast)
             
             # DEBUG LOGGING - shows values for each square
             file = chess.FILE_NAMES[file_idx]
