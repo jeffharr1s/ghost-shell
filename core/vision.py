@@ -232,9 +232,11 @@ class GhostVision:
 
     def _detect_piece_in_square(self, cell_img, rank_idx, file_idx):
         """
-        Advanced piece detection using multiple methods.
+        Advanced piece detection using multiple methods with DEBUG logging.
         Returns True if a piece is likely present.
         """
+        import chess
+        
         if cell_img.size == 0:
             return False
         
@@ -259,10 +261,22 @@ class GhostVision:
             
             # Combine methods: need at least 2 of 3 indicators
             detection_score = sum([has_edges, has_variance, has_contrast])
+            result = detection_score >= 2
             
-            return detection_score >= 2
+            # DEBUG LOGGING - shows values for each square
+            file = chess.FILE_NAMES[file_idx]
+            rank = 8 - rank_idx
+            self.logger.log(
+                f"{file}{rank}: edge={edge_density:.3f}({'✓' if has_edges else '✗'}), "
+                f"std={std_dev:.1f}({'✓' if has_variance else '✗'}), "
+                f"contrast={contrast:.0f}({'✓' if has_contrast else '✗'}) "
+                f"→ {'PIECE' if result else 'empty'}"
+            )
             
-        except Exception:
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Detection error at {file_idx},{rank_idx}: {e}")
             return False
 
     def get_board_piece_map(self):
@@ -276,6 +290,7 @@ class GhostVision:
         if not self.board_location:
             return {}
         
+        self.logger.log("=== DETECTING PIECES ===")
         frame = self.capture_screen()
         bx, by, bw, bh = self.board_location
         sq_size = int(self.square_size)
@@ -300,6 +315,7 @@ class GhostVision:
                     rank = 8 - rank_idx  # flip: rank 8 at top, 1 at bottom for white
                     piece_map[(file, rank)] = 'piece'
         
+        self.logger.log(f"=== DETECTED {len(piece_map)} PIECES ===")
         return piece_map
 
     def detect_move_from_maps(self, prev_map, curr_map):
@@ -348,23 +364,4 @@ class GhostVision:
         Returns UCI move string like 'e2e4' or None if no move detected.
         """
         curr_map = self.get_board_piece_map()
-        move = self.detect_move_from_maps(prev_map, curr_map)
-        
-        if not move:
-            return None
-        
-        from_sq, to_sq = move
-        return self.square_to_uci(from_sq) + self.square_to_uci(to_sq)
-
-
-if __name__ == "__main__":
-    vision = GhostVision()
-    print("Open a chess board in 3 seconds...")
-    time.sleep(3)
-    
-    loc = vision.find_board()
-    if loc:
-        print(f"Board at: {loc}")
-        vision.debug_draw_board()
-    else:
-        print("Failed to detect. Run debug to see what it sees.")
+        move = self.detect_move_from_maps(
