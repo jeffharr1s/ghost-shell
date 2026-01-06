@@ -229,18 +229,6 @@ class GhostVision:
         cv2.imwrite("debug_vision.jpg", img)
         print("Saved debug_vision.jpg - check if grid aligns")
 
-if __name__ == "__main__":
-    vision = GhostVision()
-    print("Open a chess board in 3 seconds...")
-    time.sleep(3)
-    
-    loc = vision.find_board()
-    if loc:
-        print(f"Board at: {loc}")
-        vision.debug_draw_board()
-    else:
-        print("Failed to detect. Run debug to see what it sees.")
-
     def get_board_piece_map(self):
         """
         Capture the current board region and return a mapping
@@ -336,3 +324,17 @@ if __name__ == "__main__":
         
         from_sq, to_sq = move
         return self.square_to_uci(from_sq) + self.square_to_uci(to_sq)
+
+
+if __name__ == "__main__":
+    vision = GhostVision()
+    print("Open a chess board in 3 seconds...")
+    time.sleep(3)
+    
+    loc = vision.find_board()
+    if loc:
+        print(f"Board at: {loc}")
+        vision.debug_draw_board()
+    else:
+        print("Failed to detect. Run debug to see what it sees.")
+
