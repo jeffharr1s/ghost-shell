@@ -6,13 +6,14 @@ import chess
 from utils.logger import Logger
 
 # Piece detection thresholds (tuned to require clear edges)
-EDGE_MIN = 0.04
-STD_MIN = 14.0
-CONTRAST_MIN = 60.0
+# Lowered thresholds to catch opponent pawns better
+EDGE_MIN = 0.02  # reduced from 0.04 to catch smaller/fainter pieces
+STD_MIN = 8.0    # reduced from 14.0 to catch opponent pawns
+CONTRAST_MIN = 40.0  # reduced from 60.0 to be more lenient
 
 # Color classification threshold
 # Higher means more conservative. If you get too many '?' results, lower this a bit.
-COLOR_DELTA_MIN = 12.0
+COLOR_DELTA_MIN = 8.0  # reduced from 12.0 for more lenient color detection
 
 
 class GhostVision:
@@ -320,12 +321,13 @@ class GhostVision:
         {(file, rank): 'w' or 'b' or '?'}.
         Empty squares are omitted.
         """
-        if not self.board_location:
-            self.logger.error("Board not locked. Run find_board() first.")
-            return {}
+        try:
+            if not self.board_location:
+                self.logger.error("Board not locked. Run find_board() first.")
+                return {}
 
-        sample_count = max(1, sample_count)
-        self.logger.log(f"=== DETECTING PIECES ({sample_count} sample(s)) ===")
+            sample_count = max(1, sample_count)
+            self.logger.debug(f"Starting piece detection with {sample_count} sample(s)")
 
         bx, by, bw, bh = self.board_location
         sq_size = int(self.square_size)
@@ -374,11 +376,27 @@ class GhostVision:
                 if v[best_col] >= majority:
                     final_map[sq] = best_col
 
-        self.logger.log(f"=== DETECTED {len(final_map)} PIECES AFTER VOTING ===")
-        if not final_map:
-            self.logger.warning("No pieces detected; check thresholds or board alignment.")
+            self.logger.debug(f"Detected {len(final_map)} pieces after voting")
+            if not final_map:
+                self.logger.warning("No pieces detected on board - this could indicate:")
+                self.logger.warning("  1. Detection thresholds too strict (EDGE_MIN, STD_MIN, CONTRAST_MIN)")
+                self.logger.warning("  2. Board not fully visible or misaligned")
+                self.logger.warning("  3. Unusual lighting conditions or glare on the board")
+                self.logger.warning("  4. Yellow highlighting on last move interfering with detection")
 
-        return final_map
+            # Log the final piece map for debugging
+            if final_map:
+                self.logger.debug("Final piece map:")
+                for sq in sorted(final_map.keys()):
+                    self.logger.debug(f"  {sq}: {final_map[sq]}")
+
+            return final_map
+
+        except Exception as e:
+            self.logger.error(f"Exception in get_board_piece_map: {type(e).__name__}: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+            return {}
 
     def detect_move_from_maps(self, prev_map, curr_map):
         """
@@ -402,16 +420,24 @@ class GhostVision:
             if sq not in prev_map:
                 added[sq] = p
 
+        # Log the differences found
+        self.logger.debug(f"MOVE DETECTION ANALYSIS:")
+        self.logger.debug(f"  Pieces removed (left board): {removed}")
+        self.logger.debug(f"  Pieces added (new position):  {added}")
+        self.logger.debug(f"  Pieces changed (color flip):  {changed}")
+
         # Normal move: from becomes empty, to becomes occupied
         if len(removed) == 1 and len(added) == 1:
             from_sq = list(removed.keys())[0]
             to_sq = list(added.keys())[0]
+            self.logger.debug(f"  -> NORMAL MOVE: {from_sq} to {to_sq}")
             return (from_sq, to_sq)
 
         # Capture: from becomes empty, destination stays occupied but color flips
         if len(removed) == 1 and len(added) == 0 and len(changed) == 1:
             from_sq = list(removed.keys())[0]
             to_sq = list(changed.keys())[0]
+            self.logger.debug(f"  -> CAPTURE MOVE: {from_sq} captures on {to_sq}")
             return (from_sq, to_sq)
 
         # En passant like pattern: from + captured pawn removed, to added
@@ -419,7 +445,18 @@ class GhostVision:
             to_sq = list(added.keys())[0]
             for sq in removed.keys():
                 if sq != to_sq:
+                    self.logger.debug(f"  -> EN PASSANT MOVE: {sq} to {to_sq}")
                     return (sq, to_sq)
+
+        # No move detected - log why
+        self.logger.warning(f"  -> NO MOVE DETECTED")
+        self.logger.warning(f"     Removed: {len(removed)}, Added: {len(added)}, Changed: {len(changed)}")
+        if removed:
+            self.logger.warning(f"     Removed squares: {list(removed.keys())}")
+        if added:
+            self.logger.warning(f"     Added squares: {list(added.keys())}")
+        if changed:
+            self.logger.warning(f"     Changed squares: {list(changed.keys())}")
 
         return None
 
@@ -429,22 +466,84 @@ class GhostVision:
         file, rank = square
         return f"{file}{rank}"
 
+    def diagnose_piece_detection(self, prev_map, curr_map):
+        """
+        Compare piece detection across squares to find why detection failed.
+        Helpful for debugging color/shading/highlighting issues.
+        """
+        self.logger.warning("=== PIECE DETECTION DIAGNOSIS ===")
+
+        all_squares = set(prev_map.keys()) | set(curr_map.keys())
+
+        for sq in sorted(all_squares):
+            prev_color = prev_map.get(sq, None)
+            curr_color = curr_map.get(sq, None)
+
+            if prev_color is None and curr_color is None:
+                continue  # Empty in both - skip
+
+            if prev_color == curr_color:
+                continue  # No change - skip
+
+            # Something changed on this square
+            file, rank = sq
+            file_idx = chess.FILE_NAMES.index(file)
+            rank_idx = 8 - rank
+
+            self.logger.warning(f"  {sq}: {prev_color} -> {curr_color}")
+
+            # Re-capture and analyze this specific square
+            try:
+                frame = self.capture_screen()
+                bx, by, bw, bh = self.board_location
+                sq_size = int(self.square_size)
+
+                x1 = bx + file_idx * sq_size
+                y1 = by + rank_idx * sq_size
+                x2 = x1 + sq_size
+                y2 = y1 + sq_size
+
+                cell_img = frame[y1:y2, x1:x2]
+
+                # Check if piece detection is working
+                has_piece = self._detect_piece_in_square(cell_img, rank_idx, file_idx)
+                detected_color = self._classify_piece_color(cell_img, rank_idx, file_idx) if has_piece else 'none'
+
+                self.logger.warning(f"    Current detection: has_piece={has_piece}, color={detected_color}")
+
+            except Exception as e:
+                self.logger.error(f"    Error diagnosing {sq}: {e}")
+
     def detect_opponent_move_uci(self, prev_map, sample_count: int = 3):
         """
         Detect opponent move by comparing previous board state to current.
         Returns UCI move string like 'e2e4' or None.
         """
-        curr_map = self.get_board_piece_map(sample_count=sample_count)
-        if not curr_map:
-            self.logger.error("Could not detect pieces on the current frame.")
-            return None
+        try:
+            self.logger.debug(f"detect_opponent_move_uci: prev_map has {len(prev_map)} pieces")
+            curr_map = self.get_board_piece_map(sample_count=sample_count)
+            if not curr_map:
+                self.logger.warning("Could not detect ANY pieces on the current frame.")
+                self.logger.warning("This might be due to: wrong threshold values, board not visible, bad lighting, or highlighting interference")
+                return None
 
-        move = self.detect_move_from_maps(prev_map, curr_map)
-        if not move:
-            return None
+            self.logger.debug(f"curr_map has {len(curr_map)} pieces, prev_map has {len(prev_map)} pieces")
+            move = self.detect_move_from_maps(prev_map, curr_map)
+            if not move:
+                self.logger.warning("No move pattern detected from piece comparison")
+                # Run diagnosis to understand why
+                self.diagnose_piece_detection(prev_map, curr_map)
+                return None
 
-        from_sq, to_sq = move
-        return self.square_to_uci(from_sq) + self.square_to_uci(to_sq)
+            from_sq, to_sq = move
+            uci_move = self.square_to_uci(from_sq) + self.square_to_uci(to_sq)
+            self.logger.debug(f"Detected move: {uci_move}")
+            return uci_move
+        except Exception as e:
+            self.logger.error(f"Exception in detect_opponent_move_uci: {type(e).__name__}: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+            return None
 
 
 if __name__ == "__main__":

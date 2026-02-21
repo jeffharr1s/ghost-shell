@@ -27,16 +27,23 @@ class GhostEngine:
     def get_human_move(self, fen):
         """returns best move, but sometimes picks 2nd best to look human"""
         try:
+            self.logger.debug(f"Setting FEN position...")
             self.stockfish.set_fen_position(fen)
+            self.logger.debug(f"Getting top 3 moves...")
             top_moves = self.stockfish.get_top_moves(3)
+            self.logger.debug(f"Got {len(top_moves)} top moves")
         except Exception as e:
-            self.logger.error(f"Stockfish error: {e}")
+            self.logger.error(f"Stockfish error: {type(e).__name__}: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
             return None
-        
+
         if not top_moves:
+            self.logger.error("No top moves returned from engine!")
             return None
 
         best_move = top_moves[0]
+        self.logger.debug(f"Best move: {best_move}")
         
         # the turing filter - if moves are close, sometimes pick #2
         if len(top_moves) > 1:

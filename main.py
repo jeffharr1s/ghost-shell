@@ -70,163 +70,271 @@ class GhostShell:
             # update baseline
             previous_state_img = current_state_img
 
-    def run(self):
-        self.logger.log("Initializing Ghost-Shell...")
+    def retry_move(self, start_sq, end_sq):
+        """retry making a move if it failed the first time"""
+        self.logger.log(f"Retrying move {start_sq} -> {end_sq}")
+        start_coords = self.get_square_center(start_sq)
+        end_coords = self.get_square_center(end_sq)
+        sq_size = int(self.vision.square_size)
+        is_white = self.user_side == chess.WHITE
 
-        # ask user which side they're playing
-        print("\n" + "=" * 50)
-        print("Which side are you playing?")
-        print("  [W] White (you move first)")
-        print("  [B] Black (opponent moves first)")
-        print("  [A] Auto-detect (may not be accurate)")
-        print("=" * 50)
+        self.overlay.draw_move_arrow(start_coords, end_coords)
+        time.sleep(0.3)
 
-        # Bring console window to foreground on Windows
-        if sys.platform == 'win32':
-            try:
-                kernel32 = ctypes.windll.kernel32
-                user32 = ctypes.windll.user32
-                hwnd = kernel32.GetConsoleWindow()
-                if hwnd:
-                    user32.SetForegroundWindow(hwnd)
-                    user32.SetFocus(hwnd)
-            except Exception:
-                pass  # Silently fail if can't set focus
-
-        # Make a beep sound to alert user
-        print('\a')
-
-        side_input = input("Enter W/B/A: ").strip().upper()
-
-        if side_input == "W":
-            self.user_side = chess.WHITE
-        elif side_input == "B":
-            self.user_side = chess.BLACK
-        else:
-            # will try auto-detect after board found
-            pass
-
-        self.logger.warning("Make sure the board is visible.")
-        self.logger.warning("Press 'S' to start.")
-        keyboard.wait('s')
-
-        location = self.vision.find_board()
-        if not location:
-            self.logger.error("Couldnt find board. Exiting.")
-            return
-
-        # snap overlay to board
-        self.overlay.update_geometry(*location)
-
-        # auto-detect if user chose A
-        if side_input == "A" or PLAYER_SIDE == "AUTO":
-            detected_side = self.vision.detect_player_side()
-            if detected_side is not None:
-                self.user_side = detected_side
-
-        self.logger.success(
-            f"Board locked. Playing as {'White' if self.user_side == chess.WHITE else 'Black'}."
+        self.humanizer.make_move(
+            start_coords, end_coords, None, sq_size, is_white
         )
+        self.overlay.clear()
+        self.logger.success("Move retry complete.")
 
-        # if playing black, wait for opponent's first move
-        if self.user_side == chess.BLACK:
-            self.logger.log("Playing as Black - waiting for White's first move...")
-            print("\nEnter opponent's first move when ready.")
-            while True:
-                move = input("Opponent's move (e.g. e2e4): ").strip().lower()
-                if move:
-                    try:
-                        self.board.push_uci(move)
-                        self.prev_map = self.vision.get_board_piece_map()
-                        break
-                    except ValueError:
-                        self.logger.error(f"Invalid move: {move}")
+    def run(self):
+        try:
+            self.logger.log("Initializing Ghost-Shell...")
 
-        # Initialize prev_map for board state tracking
-        if not hasattr(self, 'prev_map'):
-            self.prev_map = self.vision.get_board_piece_map()
+            # ask user which side they're playing
+            print("\n" + "=" * 50)
+            print("Which side are you playing?")
+            print("  [W] White (you move first)")
+            print("  [B] Black (opponent moves first)")
+            print("  [A] Auto-detect (may not be accurate)")
+            print("=" * 50)
 
-        while not self.board.is_game_over():
+            # Bring console window to foreground on Windows
+            if sys.platform == 'win32':
+                try:
+                    kernel32 = ctypes.windll.kernel32
+                    user32 = ctypes.windll.user32
+                    hwnd = kernel32.GetConsoleWindow()
+                    if hwnd:
+                        user32.SetForegroundWindow(hwnd)
+                        user32.SetFocus(hwnd)
+                except Exception as e:
+                    self.logger.warning(f"Could not set window focus: {e}")
 
-            if self.board.turn == self.user_side:
-                think_time = random.uniform(THINK_TIME_MIN, THINK_TIME_MAX)
-                self.logger.log(f"My turn. Thinking for {think_time:.1f}s...")
-                time.sleep(think_time)
+            # Make a beep sound to alert user
+            print('\a')
 
-                fen = self.board.fen()
-                best_move_uci = self.engine.get_human_move(fen)
+            self.logger.debug("Waiting for user to select side...")
+            side_input = input("Enter W/B/A: ").strip().upper()
+            self.logger.debug(f"User selected: {side_input}")
 
-                if best_move_uci:
-                    start_sq = best_move_uci[:2]
-                    end_sq = best_move_uci[2:4]
-
-                    start_coords = self.get_square_center(start_sq)
-                    end_coords = self.get_square_center(end_sq)
-
-                    promotion_piece = None
-                    if len(best_move_uci) > 4:
-                        promotion_piece = best_move_uci[4]
-
-                    sq_size = int(self.vision.square_size)
-                    is_white = self.user_side == chess.WHITE
-
-                    # show the move on HUD
-                    self.overlay.draw_move_arrow(start_coords, end_coords)
-                    time.sleep(0.3)
-
-                    self.humanizer.make_move(
-                        start_coords, end_coords, promotion_piece, sq_size, is_white
-                    )
-                    self.overlay.clear()
-                    self.board.push_uci(best_move_uci)
-                    self.prev_map = self.vision.get_board_piece_map()
-
-                    # log the move made
-                    self.logger.success(f"Played: {best_move_uci}")
+            if side_input == "W":
+                self.user_side = chess.WHITE
+                self.logger.debug("White selected")
+            elif side_input == "B":
+                self.user_side = chess.BLACK
+                self.logger.debug("Black selected")
             else:
-                self.logger.warning("Opponent's turn.")
-                print(f"\n{self.board}")
-                print(
-                    f"\nLegal moves: {', '.join([m.uci() for m in list(self.board.legal_moves)[:10]])}..."
-                )
+                self.logger.debug("Auto-detect mode selected")
 
-                detected = self.wait_for_opponent_move()
+            self.logger.warning("Make sure the board is visible.")
+            self.logger.warning("Press 'S' to start.")
+            self.logger.debug("Waiting for user to press 'S'...")
+            keyboard.wait('s')
+            self.logger.debug("'S' pressed, starting board detection...")
 
-                if detected is None:
-                    break
+            self.logger.debug("Calling vision.find_board()...")
+            location = self.vision.find_board()
+            if not location:
+                self.logger.error("Couldnt find board. Exiting.")
+                return
 
-                if detected:
-                    # Try auto-detecting the move
-                    uci_move = None
+            self.logger.debug(f"Board found at: {location}")
 
-                    # Keep scanning a few times until a move is detected
-                    for _ in range(20):
-                        uci_move = self.vision.detect_opponent_move_uci(self.prev_map)
-                        if uci_move:
-                            self.logger.success(f"Auto-detected move: {uci_move}")
-                            break
-                        time.sleep(0.25)
+            # snap overlay to board
+            self.logger.debug("Updating overlay geometry...")
+            self.overlay.update_geometry(*location)
 
-                    time.sleep(1.5)  # Wait longer for move to complete
+            # auto-detect if user chose A
+            if side_input == "A" or PLAYER_SIDE == "AUTO":
+                self.logger.debug("Auto-detecting player side...")
+                detected_side = self.vision.detect_player_side()
+                if detected_side is not None:
+                    self.user_side = detected_side
+                    self.logger.debug(f"Auto-detected side: {detected_side}")
 
-                    # Fallback to manual input if auto-detection fails
-                    if not uci_move:
-                        self.logger.log("Movement detected! Enter the move.")
+            self.logger.success(
+                f"Board locked. Playing as {'White' if self.user_side == chess.WHITE else 'Black'}."
+            )
 
-                    while True:
-                        move = uci_move or input("Opponent's move (e.g. e7e5): ").strip().lower()
+            # if playing black, wait for opponent's first move
+            if self.user_side == chess.BLACK:
+                self.logger.log("Playing as Black - waiting for White's first move...")
+                print("\nEnter opponent's first move when ready.")
+                while True:
+                    move = input("Opponent's move (e.g. e2e4): ").strip().lower()
+                    if move:
                         try:
+                            self.logger.debug(f"Attempting to push move: {move}")
                             self.board.push_uci(move)
+                            self.logger.debug("Getting initial board piece map...")
                             self.prev_map = self.vision.get_board_piece_map()
+                            self.logger.debug(f"Initial piece map: {len(self.prev_map)} pieces")
                             break
-                        except ValueError:
-                            self.logger.error(f"Invalid move: {move}")
-                            print(
-                                f"Legal moves: {', '.join([m.uci() for m in list(self.board.legal_moves)[:10]])}..."
+                        except ValueError as e:
+                            self.logger.error(f"Invalid move '{move}': {e}")
+
+            # Initialize prev_map for board state tracking
+            if not hasattr(self, 'prev_map'):
+                self.logger.debug("Initializing prev_map for the first time...")
+                self.prev_map = self.vision.get_board_piece_map()
+                self.logger.debug(f"Initialized with {len(self.prev_map)} pieces")
+
+            self.logger.debug("Checking if game is over...")
+            while not self.board.is_game_over():
+                try:
+                    if self.board.turn == self.user_side:
+                        self.logger.log("=== MY TURN ===")
+                        think_time = random.uniform(THINK_TIME_MIN, THINK_TIME_MAX)
+                        self.logger.log(f"Thinking for {think_time:.1f}s...")
+                        time.sleep(think_time)
+
+                        self.logger.debug("Getting FEN from board...")
+                        fen = self.board.fen()
+                        self.logger.debug(f"FEN: {fen}")
+
+                        self.logger.debug("Requesting best move from engine...")
+                        best_move_uci = self.engine.get_human_move(fen)
+                        self.logger.debug(f"Engine returned: {best_move_uci}")
+
+                        if best_move_uci:
+                            start_sq = best_move_uci[:2]
+                            end_sq = best_move_uci[2:4]
+                            self.logger.debug(f"Move: {start_sq} -> {end_sq}")
+
+                            self.logger.debug("Calculating screen coordinates...")
+                            start_coords = self.get_square_center(start_sq)
+                            end_coords = self.get_square_center(end_sq)
+                            self.logger.debug(f"Screen coords: {start_coords} -> {end_coords}")
+
+                            promotion_piece = None
+                            if len(best_move_uci) > 4:
+                                promotion_piece = best_move_uci[4]
+                                self.logger.debug(f"Promotion piece: {promotion_piece}")
+
+                            sq_size = int(self.vision.square_size)
+                            is_white = self.user_side == chess.WHITE
+
+                            # show the move on HUD
+                            self.logger.debug("Drawing move arrow on overlay...")
+                            self.overlay.draw_move_arrow(start_coords, end_coords)
+                            time.sleep(0.3)
+
+                            self.logger.debug("Making move with humanizer...")
+                            self.humanizer.make_move(
+                                start_coords, end_coords, promotion_piece, sq_size, is_white
                             )
+                            self.logger.debug("Move made, clearing overlay...")
+                            self.overlay.clear()
+
+                            self.logger.debug(f"Pushing move to board: {best_move_uci}")
+                            self.board.push_uci(best_move_uci)
+                            self.logger.debug("Getting new board piece map...")
+                            self.prev_map = self.vision.get_board_piece_map()
+                            self.logger.debug(f"Board now has {len(self.prev_map)} pieces")
+
+                            # log the move made
+                            self.logger.success(f"Played: {best_move_uci}")
+
+                            # Offer retry option if move didn't seem to register
+                            self.logger.log("Press SPACE if piece didn't move, any other key to continue...")
+                            if keyboard.is_pressed('space'):
+                                self.logger.warning("SPACE pressed - retrying move")
+                                self.retry_move(start_sq, end_sq)
+                                self.logger.log("Retry complete. Continuing...")
+                        else:
+                            self.logger.error("Engine returned no move!")
+
+                    else:
+                        self.logger.log("=== OPPONENT'S TURN ===")
+                        print(f"\n{self.board}")
+                        print(
+                            f"\nLegal moves: {', '.join([m.uci() for m in list(self.board.legal_moves)[:10]])}..."
+                        )
+
+                        self.logger.debug("Waiting for opponent to move...")
+                        detected = self.wait_for_opponent_move()
+
+                        if detected is None:
+                            self.logger.warning("Quit detected during opponent's move.")
+                            break
+
+                        if detected:
+                            # Try auto-detecting the move
                             uci_move = None
 
-        self.logger.success("Game Over.")
+                            self.logger.debug("Attempting auto-detection of opponent's move...")
+                            self.logger.debug(f"Previous board state had {len(self.prev_map)} pieces")
+                            # Keep scanning a few times until a move is detected
+                            for attempt in range(20):
+                                self.logger.debug(f"Auto-detect attempt {attempt + 1}/20...")
+                                uci_move = self.vision.detect_opponent_move_uci(self.prev_map)
+                                if uci_move:
+                                    self.logger.success(f"Auto-detected move: {uci_move}")
+                                    break
+                                time.sleep(0.25)
+
+                            if not uci_move:
+                                self.logger.error("=" * 60)
+                                self.logger.error("AUTO-DETECTION FAILED AFTER 20 ATTEMPTS")
+                                self.logger.error("Common causes:")
+                                self.logger.error("  - Yellow highlight on last move interfering with detection")
+                                self.logger.error("  - Board alignment or visibility issues")
+                                self.logger.error("  - Color/shading of pieces not distinct enough")
+                                self.logger.error("  - Try adjusting lighting or board zoom level")
+                                self.logger.error("=" * 60)
+
+                            time.sleep(1.5)  # Wait longer for move to complete
+
+                            # Fallback to manual input if auto-detection fails
+                            if not uci_move:
+                                self.logger.log("Movement detected! Enter the move.")
+
+                            while True:
+                                move = uci_move or input("Opponent's move (e.g. e7e5, or 'z' to undo): ").strip().lower()
+                                self.logger.debug(f"User entered move: {move}")
+
+                                # Check for undo command
+                                if move == 'z':
+                                    if len(self.board.move_stack) > 0:
+                                        self.logger.debug("Undo requested...")
+                                        undone_move = self.board.pop()
+                                        self.logger.warning(f"Undone opponent move: {undone_move.uci()}")
+                                        self.logger.debug("Recapturing board state...")
+                                        self.prev_map = self.vision.get_board_piece_map()
+                                        # Ask for the correct move
+                                        continue
+                                    else:
+                                        self.logger.error("No move to undo.")
+                                        continue
+
+                                try:
+                                    self.logger.debug(f"Pushing move to board: {move}")
+                                    self.board.push_uci(move)
+                                    self.logger.debug("Getting updated board piece map...")
+                                    self.prev_map = self.vision.get_board_piece_map()
+                                    self.logger.debug(f"Board now has {len(self.prev_map)} pieces")
+                                    self.logger.success(f"Opponent played: {move}")
+                                    break
+                                except ValueError as e:
+                                    self.logger.error(f"Invalid move '{move}': {e}")
+                                    print(
+                                        f"Legal moves: {', '.join([m.uci() for m in list(self.board.legal_moves)[:10]])}..."
+                                    )
+                                    uci_move = None
+
+                except Exception as e:
+                    self.logger.error(f"Exception in game loop: {type(e).__name__}: {e}")
+                    import traceback
+                    self.logger.error(traceback.format_exc())
+                    self.logger.warning("Attempting to continue...")
+
+            self.logger.success("Game Over.")
+
+        except Exception as e:
+            self.logger.error(f"Critical error in run(): {type(e).__name__}: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
 
 if __name__ == "__main__":
     bot = GhostShell()
