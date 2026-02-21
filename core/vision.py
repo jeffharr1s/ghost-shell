@@ -13,7 +13,7 @@ CONTRAST_MIN = 40.0
 # Color classification: how far a piece center must deviate from the
 # known square background brightness to be called white or black.
 # This is relative to the gap between light-square and dark-square averages.
-COLOR_RATIO_THRESHOLD = 0.10  # 10% of the light-dark gap (was 15%, too strict)
+COLOR_RATIO_THRESHOLD = 0.06  # 6% of the light-dark gap (lowered from 10%, more sensitive)
 
 
 class GhostVision:
@@ -405,23 +405,23 @@ class GhostVision:
             # the piece body to its own surrounding square.
             delta_from_edge = center_mean - edge_mean
 
-            if abs(delta_from_edge) > 15:
+            if abs(delta_from_edge) > 10:
                 # Strong signal: piece is clearly different from its background
-                if delta_from_edge > 15:
+                if delta_from_edge > 10:
                     return 'w'  # piece brighter than background = white piece
                 else:
                     return 'b'  # piece darker than background = black piece
 
             # --- Strategy 2: Absolute brightness (for highlighted/ambiguous) ---
             if is_highlighted:
-                if center_mean > 155:
+                if center_mean > 150:
                     return 'w'
-                elif center_mean < 105:
+                elif center_mean < 110:
                     return 'b'
                 # Still ambiguous with highlight - use a slightly relaxed edge delta
-                if delta_from_edge > 8:
+                if delta_from_edge > 5:
                     return 'w'
-                elif delta_from_edge < -8:
+                elif delta_from_edge < -5:
                     return 'b'
                 return '?'
 
@@ -448,12 +448,17 @@ class GhostVision:
                 return 'b'
 
             # --- Last resort: absolute brightness ---
-            if center_mean > 170:
+            if center_mean > 165:
                 return 'w'
-            elif center_mean < 90:
+            elif center_mean < 95:
                 return 'b'
 
-            return '?'
+            # --- Final fallback: if we're on a light square, piece is probably white ---
+            # --- if on dark square, piece is probably black ---
+            if is_light_square:
+                return 'b'  # piece on light square is likely black
+            else:
+                return 'w'  # piece on dark square is likely white
 
         except Exception as e:
             self.logger.error(f"Color classify error at {file_idx},{rank_idx}: {e}")
@@ -525,10 +530,12 @@ class GhostVision:
             w_count = sum(1 for c in final_map.values() if c == 'w')
             b_count = sum(1 for c in final_map.values() if c == 'b')
             q_count = sum(1 for c in final_map.values() if c == '?')
-            self.logger.debug(
+            self.logger.log(
                 f"Piece map: {len(final_map)} pieces "
                 f"(w={w_count}, b={b_count}, ?={q_count})"
             )
+            if q_count > 0:
+                self.logger.warning(f"WARNING: {q_count} pieces classified as uncertain ('?')")
 
             if not final_map:
                 self.logger.warning("No pieces detected on board!")
@@ -638,6 +645,7 @@ class GhostVision:
         self.logger.warning("=== PIECE DETECTION DIAGNOSIS ===")
 
         all_squares = set(prev_map.keys()) | set(curr_map.keys())
+        changes = 0
 
         for sq in sorted(all_squares):
             prev_color = prev_map.get(sq, None)
@@ -647,6 +655,11 @@ class GhostVision:
                 continue
 
             self.logger.warning(f"  {sq[0]}{sq[1]}: {prev_color or 'empty'} -> {curr_color or 'empty'}")
+            changes += 1
+
+        if changes == 0:
+            self.logger.warning("  (No changes detected between maps)")
+        self.logger.warning(f"Total pieces: prev={len(prev_map)}, curr={len(curr_map)}")
 
     def detect_opponent_move_uci(self, prev_map, sample_count: int = 3):
         """
