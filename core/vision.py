@@ -5,25 +5,44 @@ import time
 import chess
 from utils.logger import Logger
 
-# Piece detection thresholds (tuned to require clear edges)
-# Lowered thresholds to catch opponent pawns better
-EDGE_MIN = 0.02  # reduced from 0.04 to catch smaller/fainter pieces
-STD_MIN = 8.0    # reduced from 14.0 to catch opponent pawns
-CONTRAST_MIN = 40.0  # reduced from 60.0 to be more lenient
+# Piece detection thresholds
+EDGE_MIN = 0.02
+STD_MIN = 8.0
+CONTRAST_MIN = 40.0
 
-# Color classification threshold
-# Higher means more conservative. If you get too many '?' results, lower this a bit.
-COLOR_DELTA_MIN = 8.0  # reduced from 12.0 for more lenient color detection
+# Color classification: how far a piece center must deviate from the
+# known square background brightness to be called white or black.
+# This is relative to the gap between light-square and dark-square averages.
+COLOR_RATIO_THRESHOLD = 0.10  # 10% of the light-dark gap (was 15%, too strict)
 
 
 class GhostVision:
     def __init__(self):
         self.sct = mss.mss()
-        self.monitor = self.sct.monitors[1]  # Monitor 1 specifically (left 4K display)
+        self.monitor = self.sct.monitors[1]
         self.board_location = None
         self.square_size = 0
         self.logger = Logger("VISION")
-        self.monitor1_width = 3840  # Width of Monitor 1 (left 4K display)
+        self.monitor1_width = 3840
+        # Learned board square colors (set during find_board)
+        self.light_square_brightness = None
+        self.dark_square_brightness = None
+        # Board orientation: True = white on bottom (rank 8 at top of screen)
+        # False = black on bottom (board flipped)
+        self.white_on_bottom = True
+
+    def set_orientation(self, user_side):
+        """
+        Set board orientation based on which side the user is playing.
+        Call this after detect_player_side() or manual side selection.
+        user_side: chess.WHITE or chess.BLACK
+        """
+        self.white_on_bottom = (user_side == chess.WHITE)
+        self.logger.log(
+            f"Board orientation: {'white' if self.white_on_bottom else 'black'} on bottom"
+        )
+        # Recalibrate since corner identity depends on orientation
+        self._calibrate_square_colors()
 
     def capture_screen(self):
         img = np.array(self.sct.grab(self.monitor))
@@ -33,12 +52,10 @@ class GhostVision:
         """tries multiple methods to find the board"""
         self.logger.log("Looking for board...")
 
-        # try color-based detection first (works better with pieces)
         result = self._find_board_by_colors()
         if result:
             return result
 
-        # fallback to corner detection (works on empty boards)
         result = self._find_board_by_corners()
         if result:
             return result
@@ -48,6 +65,87 @@ class GhostVision:
         self.logger.error("- No overlays/popups blocking it")
         self.logger.error("- Try zooming browser to make board bigger")
         return None
+
+    def _screen_to_square(self, rank_idx, file_idx):
+        """
+        Convert screen grid position (rank_idx=row from top, file_idx=col from left)
+        to chess square (file_letter, rank_number) respecting board orientation.
+
+        When white_on_bottom=True:  rank_idx 0 = rank 8, file_idx 0 = a-file
+        When white_on_bottom=False: rank_idx 0 = rank 1, file_idx 0 = h-file
+        """
+        if self.white_on_bottom:
+            file_letter = chess.FILE_NAMES[file_idx]
+            rank_number = 8 - rank_idx
+        else:
+            file_letter = chess.FILE_NAMES[7 - file_idx]
+            rank_number = rank_idx + 1
+        return (file_letter, rank_number)
+
+    def _square_color_on_board(self, file_letter, rank_number):
+        """
+        Returns True if the square is a light square on a standard chess board.
+        a1 is dark, a2 is light, etc.
+        """
+        file_idx = chess.FILE_NAMES.index(file_letter)
+        return (file_idx + rank_number) % 2 == 1
+
+    def _calibrate_square_colors(self, frame=None):
+        """
+        Learn what light and dark squares look like by sampling the 4 corner
+        squares of the board, taking orientation into account.
+        """
+        if not self.board_location:
+            return
+        if frame is None:
+            frame = self.capture_screen()
+
+        bx, by, bw, bh = self.board_location
+        sq = int(self.square_size)
+
+        def sample_square_edge(rank_idx, file_idx):
+            """Return mean gray brightness of the outer ring of a square."""
+            x1 = bx + file_idx * sq
+            y1 = by + rank_idx * sq
+            cell = frame[y1:y1 + sq, x1:x1 + sq]
+            if cell.size == 0:
+                return None
+            gray = cv2.cvtColor(cell, cv2.COLOR_BGR2GRAY)
+            h, w = gray.shape[:2]
+            margin = max(3, min(h, w) // 8)
+            top = gray[0:margin, :]
+            bot = gray[h - margin:h, :]
+            lft = gray[:, 0:margin]
+            rgt = gray[:, w - margin:w]
+            return float(np.mean(np.concatenate([top.ravel(), bot.ravel(),
+                                                  lft.ravel(), rgt.ravel()])))
+
+        light_samples = []
+        dark_samples = []
+
+        # Sample all 4 corners and use orientation to determine which is light/dark
+        corner_positions = [(0, 0), (0, 7), (7, 0), (7, 7)]
+        for ri, fi in corner_positions:
+            file_letter, rank_number = self._screen_to_square(ri, fi)
+            is_light = self._square_color_on_board(file_letter, rank_number)
+            val = sample_square_edge(ri, fi)
+            if val is not None:
+                if is_light:
+                    light_samples.append(val)
+                else:
+                    dark_samples.append(val)
+
+        if light_samples and dark_samples:
+            self.light_square_brightness = float(np.mean(light_samples))
+            self.dark_square_brightness = float(np.mean(dark_samples))
+            self.logger.log(
+                f"Calibrated squares: light={self.light_square_brightness:.1f}, "
+                f"dark={self.dark_square_brightness:.1f}"
+            )
+        else:
+            self.logger.warning("Could not calibrate square colors, using defaults")
+            self.light_square_brightness = 200.0
+            self.dark_square_brightness = 130.0
 
     def _find_board_by_colors(self):
         """finds board by looking for grid pattern of light/dark squares"""
@@ -85,6 +183,7 @@ class GhostVision:
                 self.board_location = (x, y, w, h)
                 self.square_size = w / 8
                 self.logger.success(f"Found board at ({x}, {y}) size {w}x{h}")
+                self._calibrate_square_colors(frame)
                 return self.board_location
 
         return None
@@ -156,6 +255,7 @@ class GhostVision:
 
             self.board_location = (board_x, board_y, board_w, board_h)
             self.square_size = board_w / 8
+            self._calibrate_square_colors(frame)
 
             return self.board_location
 
@@ -191,7 +291,7 @@ class GhostVision:
         return chess.BLACK
 
     def get_square_roi(self, rank, file):
-        """gets image of a specific square"""
+        """gets image of a specific square (rank/file are screen grid indices)"""
         if not self.board_location:
             return None
 
@@ -223,14 +323,18 @@ class GhostVision:
                 sx = int(x + c * sq)
                 sy = int(y + r * sq)
                 cv2.rectangle(img, (sx, sy), (int(sx + sq), int(sy + sq)), (0, 0, 255), 1)
+                # Label with chess square name
+                fl, rn = self._screen_to_square(r, c)
+                cv2.putText(img, f"{fl}{rn}", (sx + 2, sy + 14),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
 
         cv2.imwrite("debug_vision.jpg", img)
         print("Saved debug_vision.jpg")
 
     def _detect_piece_in_square(self, cell_img, rank_idx, file_idx):
         """
-        Advanced piece detection using multiple methods with debug logging.
-        Returns True if a piece is likely present.
+        Returns True if a piece is likely present in this cell.
+        Uses edge density + variance/contrast.
         """
         if cell_img.size == 0:
             return False
@@ -250,18 +354,7 @@ class GhostVision:
             has_variance = std_dev >= STD_MIN
             has_contrast = contrast >= CONTRAST_MIN
 
-            result = has_edges and (has_variance or has_contrast)
-
-            file = chess.FILE_NAMES[file_idx]
-            rank = 8 - rank_idx
-            self.logger.log(
-                f"{file}{rank}: edge={edge_density:.3f}({'ok' if has_edges else 'no'}), "
-                f"std={std_dev:.1f}({'ok' if has_variance else 'no'}), "
-                f"contrast={contrast:.0f}({'ok' if has_contrast else 'no'}) "
-                f"-> {'PIECE' if result else 'empty'}"
-            )
-
-            return result
+            return has_edges and (has_variance or has_contrast)
 
         except Exception as e:
             self.logger.error(f"Detection error at {file_idx},{rank_idx}: {e}")
@@ -271,10 +364,10 @@ class GhostVision:
         """
         Returns 'w' or 'b' for likely piece color, or '?' if uncertain.
 
-        Strategy:
-        - Compare mean brightness of center region vs corner regions of the same square.
-        - If center is much brighter than corners, likely white piece.
-        - If center is much darker than corners, likely black piece.
+        Uses a multi-strategy approach:
+        1. Edge-vs-center comparison (most robust, works on any background)
+        2. Absolute brightness thresholds (fallback for highlighted squares)
+        3. Calibrated background comparison (normal squares)
         """
         try:
             gray = cv2.cvtColor(cell_img, cv2.COLOR_BGR2GRAY)
@@ -282,34 +375,85 @@ class GhostVision:
             if h < 10 or w < 10:
                 return '?'
 
-            cy1, cy2 = h // 3, 2 * h // 3
-            cx1, cx2 = w // 3, 2 * w // 3
-            center = gray[cy1:cy2, cx1:cx2]
+            # --- Detect if this square is highlighted ---
+            hsv = cv2.cvtColor(cell_img, cv2.COLOR_BGR2HSV)
+            sat_mean = float(np.mean(hsv[:, :, 1]))
+            # Both Lichess and chess.com highlights have elevated saturation
+            is_highlighted = sat_mean > 45
 
-            patch = max(2, min(h, w) // 8)
-            corners = [
-                gray[0:patch, 0:patch],
-                gray[0:patch, w - patch:w],
-                gray[h - patch:h, 0:patch],
-                gray[h - patch:h, w - patch:w],
-            ]
-
+            # --- Sample the piece body (center 50% of the cell) ---
+            # Widened from 40% to 50% to better capture piece pixels
+            margin_y = int(h * 0.25)
+            margin_x = int(w * 0.25)
+            center = gray[margin_y:h - margin_y, margin_x:w - margin_x]
+            if center.size == 0:
+                return '?'
             center_mean = float(np.mean(center))
-            bg_mean = float(np.mean([np.mean(c) for c in corners]))
-            delta = center_mean - bg_mean
 
-            if delta >= COLOR_DELTA_MIN:
-                color = 'w'
-            elif delta <= -COLOR_DELTA_MIN:
-                color = 'b'
+            # --- Sample the edge of the cell (background) ---
+            edge_strip = max(3, min(h, w) // 8)
+            edge_pixels = np.concatenate([
+                gray[0:edge_strip, :].ravel(),
+                gray[h - edge_strip:h, :].ravel(),
+                gray[:, 0:edge_strip].ravel(),
+                gray[:, w - edge_strip:w].ravel(),
+            ])
+            edge_mean = float(np.mean(edge_pixels))
+
+            # --- Strategy 1: Edge-vs-center comparison (primary) ---
+            # This works regardless of background color because we're comparing
+            # the piece body to its own surrounding square.
+            delta_from_edge = center_mean - edge_mean
+
+            if abs(delta_from_edge) > 15:
+                # Strong signal: piece is clearly different from its background
+                if delta_from_edge > 15:
+                    return 'w'  # piece brighter than background = white piece
+                else:
+                    return 'b'  # piece darker than background = black piece
+
+            # --- Strategy 2: Absolute brightness (for highlighted/ambiguous) ---
+            if is_highlighted:
+                if center_mean > 155:
+                    return 'w'
+                elif center_mean < 105:
+                    return 'b'
+                # Still ambiguous with highlight - use a slightly relaxed edge delta
+                if delta_from_edge > 8:
+                    return 'w'
+                elif delta_from_edge < -8:
+                    return 'b'
+                return '?'
+
+            # --- Strategy 3: Calibrated background comparison ---
+            file_letter, rank_number = self._screen_to_square(rank_idx, file_idx)
+            is_light_square = self._square_color_on_board(file_letter, rank_number)
+
+            if self.light_square_brightness is not None and self.dark_square_brightness is not None:
+                expected_bg = (self.light_square_brightness if is_light_square
+                               else self.dark_square_brightness)
+                bg_gap = abs(self.light_square_brightness - self.dark_square_brightness)
             else:
-                color = '?'
+                expected_bg = 200.0 if is_light_square else 130.0
+                bg_gap = 70.0
 
-            file = chess.FILE_NAMES[file_idx]
-            rank = 8 - rank_idx
-            self.logger.log(f"{file}{rank}: color delta={delta:.1f} -> {color}")
+            bg_gap = max(bg_gap, 20.0)
 
-            return color
+            delta_from_bg = center_mean - expected_bg
+            threshold = bg_gap * COLOR_RATIO_THRESHOLD
+
+            if delta_from_bg > threshold:
+                return 'w'
+            elif delta_from_bg < -threshold:
+                return 'b'
+
+            # --- Last resort: absolute brightness ---
+            if center_mean > 170:
+                return 'w'
+            elif center_mean < 90:
+                return 'b'
+
+            return '?'
 
         except Exception as e:
             self.logger.error(f"Color classify error at {file_idx},{rank_idx}: {e}")
@@ -317,78 +461,77 @@ class GhostVision:
 
     def get_board_piece_map(self, sample_count: int = 3, sample_delay: float = 0.05):
         """
-        Capture the current board region and return a mapping:
-        {(file, rank): 'w' or 'b' or '?'}.
+        Capture the current board and return a mapping:
+        {(file_letter, rank_number): 'w' or 'b' or '?'}.
         Empty squares are omitted.
+
+        Respects board orientation (white_on_bottom flag).
         """
+        if not self.board_location:
+            self.logger.error("Board not locked. Run find_board() first.")
+            return {}
+
+        sample_count = max(1, sample_count)
+
         try:
-            if not self.board_location:
-                self.logger.error("Board not locked. Run find_board() first.")
-                return {}
+            bx, by, bw, bh = self.board_location
+            sq_size = int(self.square_size)
 
-            sample_count = max(1, sample_count)
-            self.logger.debug(f"Starting piece detection with {sample_count} sample(s)")
+            all_maps = []
+            for idx in range(sample_count):
+                frame = self.capture_screen()
+                piece_map = {}
 
-        bx, by, bw, bh = self.board_location
-        sq_size = int(self.square_size)
+                for rank_idx in range(8):
+                    for file_idx in range(8):
+                        x1 = bx + file_idx * sq_size
+                        y1 = by + rank_idx * sq_size
+                        x2 = x1 + sq_size
+                        y2 = y1 + sq_size
 
-        all_maps = []
-        for idx in range(sample_count):
-            frame = self.capture_screen()
-            piece_map = {}
+                        cell_img = frame[y1:y2, x1:x2]
+                        has_piece = self._detect_piece_in_square(cell_img, rank_idx, file_idx)
+                        if not has_piece:
+                            continue
 
-            for rank_idx in range(8):
-                for file_idx in range(8):
-                    x1 = bx + file_idx * sq_size
-                    y1 = by + rank_idx * sq_size
-                    x2 = x1 + sq_size
-                    y2 = y1 + sq_size
+                        color = self._classify_piece_color(cell_img, rank_idx, file_idx)
 
-                    cell_img = frame[y1:y2, x1:x2]
-                    has_piece = self._detect_piece_in_square(cell_img, rank_idx, file_idx)
-                    if not has_piece:
-                        continue
+                        # Convert screen position to chess square using orientation
+                        file_letter, rank_number = self._screen_to_square(rank_idx, file_idx)
+                        piece_map[(file_letter, rank_number)] = color
 
-                    color = self._classify_piece_color(cell_img, rank_idx, file_idx)
+                all_maps.append(piece_map)
+                if idx < sample_count - 1:
+                    time.sleep(sample_delay)
 
-                    file = chess.FILE_NAMES[file_idx]
-                    rank = 8 - rank_idx
-                    piece_map[(file, rank)] = color
+            if sample_count == 1:
+                final_map = all_maps[0]
+            else:
+                votes = {}
+                for pm in all_maps:
+                    for sq, col in pm.items():
+                        if sq not in votes:
+                            votes[sq] = {'w': 0, 'b': 0, '?': 0}
+                        votes[sq][col] += 1
 
-            all_maps.append(piece_map)
-            if idx < sample_count - 1:
-                time.sleep(sample_delay)
+                majority = (sample_count // 2) + 1
+                final_map = {}
+                for sq, v in votes.items():
+                    best_col = max(v, key=lambda k: v[k])
+                    if v[best_col] >= majority:
+                        final_map[sq] = best_col
 
-        if sample_count == 1:
-            final_map = all_maps[0]
-        else:
-            votes = {}
-            for pm in all_maps:
-                for sq, col in pm.items():
-                    if sq not in votes:
-                        votes[sq] = {'w': 0, 'b': 0, '?': 0}
-                    votes[sq][col] += 1
+            # Summary log (not per-square spam)
+            w_count = sum(1 for c in final_map.values() if c == 'w')
+            b_count = sum(1 for c in final_map.values() if c == 'b')
+            q_count = sum(1 for c in final_map.values() if c == '?')
+            self.logger.debug(
+                f"Piece map: {len(final_map)} pieces "
+                f"(w={w_count}, b={b_count}, ?={q_count})"
+            )
 
-            majority = (sample_count // 2) + 1
-            final_map = {}
-            for sq, v in votes.items():
-                best_col = max(v, key=lambda k: v[k])
-                if v[best_col] >= majority:
-                    final_map[sq] = best_col
-
-            self.logger.debug(f"Detected {len(final_map)} pieces after voting")
             if not final_map:
-                self.logger.warning("No pieces detected on board - this could indicate:")
-                self.logger.warning("  1. Detection thresholds too strict (EDGE_MIN, STD_MIN, CONTRAST_MIN)")
-                self.logger.warning("  2. Board not fully visible or misaligned")
-                self.logger.warning("  3. Unusual lighting conditions or glare on the board")
-                self.logger.warning("  4. Yellow highlighting on last move interfering with detection")
-
-            # Log the final piece map for debugging
-            if final_map:
-                self.logger.debug("Final piece map:")
-                for sq in sorted(final_map.keys()):
-                    self.logger.debug(f"  {sq}: {final_map[sq]}")
+                self.logger.warning("No pieces detected on board!")
 
             return final_map
 
@@ -404,60 +547,84 @@ class GhostVision:
 
         Returns tuple (from_square, to_square) like (('e', 2), ('e', 4))
         or None if no clear move detected.
+
+        Treats '?' as a wildcard: a ?-to-w or w-to-? change on the same square
+        is NOT considered a color flip (it's the same piece, just uncertain read).
         """
         removed = {}
         added = {}
         changed = {}
 
+        def colors_differ(c1, c2):
+            """True only if both colors are known and they differ."""
+            if c1 == '?' or c2 == '?':
+                return False
+            return c1 != c2
+
         for sq, p in prev_map.items():
             if sq not in curr_map:
                 removed[sq] = p
-            else:
-                if curr_map[sq] != p:
-                    changed[sq] = (p, curr_map[sq])
+            elif colors_differ(p, curr_map[sq]):
+                changed[sq] = (p, curr_map[sq])
 
         for sq, p in curr_map.items():
             if sq not in prev_map:
                 added[sq] = p
 
-        # Log the differences found
-        self.logger.debug(f"MOVE DETECTION ANALYSIS:")
-        self.logger.debug(f"  Pieces removed (left board): {removed}")
-        self.logger.debug(f"  Pieces added (new position):  {added}")
-        self.logger.debug(f"  Pieces changed (color flip):  {changed}")
+        self.logger.debug(f"Move diff: removed={list(removed.keys())}, "
+                          f"added={list(added.keys())}, changed={list(changed.keys())}")
 
-        # Normal move: from becomes empty, to becomes occupied
+        # Normal move: one square emptied, one square newly occupied
         if len(removed) == 1 and len(added) == 1:
             from_sq = list(removed.keys())[0]
             to_sq = list(added.keys())[0]
             self.logger.debug(f"  -> NORMAL MOVE: {from_sq} to {to_sq}")
             return (from_sq, to_sq)
 
-        # Capture: from becomes empty, destination stays occupied but color flips
+        # Capture: attacker's origin empties, defender's square changes color
         if len(removed) == 1 and len(added) == 0 and len(changed) == 1:
             from_sq = list(removed.keys())[0]
             to_sq = list(changed.keys())[0]
-            self.logger.debug(f"  -> CAPTURE MOVE: {from_sq} captures on {to_sq}")
+            self.logger.debug(f"  -> CAPTURE: {from_sq} captures on {to_sq}")
             return (from_sq, to_sq)
 
-        # En passant like pattern: from + captured pawn removed, to added
+        # En passant: two pieces removed (pawn + captured pawn), one added
         if len(removed) == 2 and len(added) == 1:
             to_sq = list(added.keys())[0]
             for sq in removed.keys():
                 if sq != to_sq:
-                    self.logger.debug(f"  -> EN PASSANT MOVE: {sq} to {to_sq}")
+                    self.logger.debug(f"  -> EN PASSANT: {sq} to {to_sq}")
                     return (sq, to_sq)
 
-        # No move detected - log why
-        self.logger.warning(f"  -> NO MOVE DETECTED")
-        self.logger.warning(f"     Removed: {len(removed)}, Added: {len(added)}, Changed: {len(changed)}")
-        if removed:
-            self.logger.warning(f"     Removed squares: {list(removed.keys())}")
-        if added:
-            self.logger.warning(f"     Added squares: {list(added.keys())}")
-        if changed:
-            self.logger.warning(f"     Changed squares: {list(changed.keys())}")
+        # Castling: king + rook both move (2 removed, 2 added)
+        if len(removed) == 2 and len(added) == 2:
+            king_from = None
+            for sq in removed:
+                if sq[0] == 'e':
+                    king_from = sq
+                    break
+            if king_from:
+                for sq in added:
+                    if sq[0] in ('c', 'g') and sq[1] == king_from[1]:
+                        self.logger.debug(f"  -> CASTLING: {king_from} to {sq}")
+                        return (king_from, sq)
 
+        # Fuzzy fallback: best pair from removed/added
+        if len(removed) >= 1 and len(added) >= 1 and len(removed) + len(added) <= 4:
+            best_pair = None
+            best_dist = -1
+            for r_sq in removed:
+                for a_sq in added:
+                    dist = abs(ord(r_sq[0]) - ord(a_sq[0])) + abs(r_sq[1] - a_sq[1])
+                    if dist > best_dist:
+                        best_dist = dist
+                        best_pair = (r_sq, a_sq)
+            if best_pair:
+                self.logger.debug(f"  -> FUZZY: {best_pair[0]} to {best_pair[1]}")
+                return best_pair
+
+        self.logger.warning(f"  -> NO MOVE DETECTED "
+                            f"(rem={len(removed)}, add={len(added)}, chg={len(changed)})")
         return None
 
     @staticmethod
@@ -467,10 +634,7 @@ class GhostVision:
         return f"{file}{rank}"
 
     def diagnose_piece_detection(self, prev_map, curr_map):
-        """
-        Compare piece detection across squares to find why detection failed.
-        Helpful for debugging color/shading/highlighting issues.
-        """
+        """Compare maps square-by-square for debugging."""
         self.logger.warning("=== PIECE DETECTION DIAGNOSIS ===")
 
         all_squares = set(prev_map.keys()) | set(curr_map.keys())
@@ -479,40 +643,10 @@ class GhostVision:
             prev_color = prev_map.get(sq, None)
             curr_color = curr_map.get(sq, None)
 
-            if prev_color is None and curr_color is None:
-                continue  # Empty in both - skip
-
             if prev_color == curr_color:
-                continue  # No change - skip
+                continue
 
-            # Something changed on this square
-            file, rank = sq
-            file_idx = chess.FILE_NAMES.index(file)
-            rank_idx = 8 - rank
-
-            self.logger.warning(f"  {sq}: {prev_color} -> {curr_color}")
-
-            # Re-capture and analyze this specific square
-            try:
-                frame = self.capture_screen()
-                bx, by, bw, bh = self.board_location
-                sq_size = int(self.square_size)
-
-                x1 = bx + file_idx * sq_size
-                y1 = by + rank_idx * sq_size
-                x2 = x1 + sq_size
-                y2 = y1 + sq_size
-
-                cell_img = frame[y1:y2, x1:x2]
-
-                # Check if piece detection is working
-                has_piece = self._detect_piece_in_square(cell_img, rank_idx, file_idx)
-                detected_color = self._classify_piece_color(cell_img, rank_idx, file_idx) if has_piece else 'none'
-
-                self.logger.warning(f"    Current detection: has_piece={has_piece}, color={detected_color}")
-
-            except Exception as e:
-                self.logger.error(f"    Error diagnosing {sq}: {e}")
+            self.logger.warning(f"  {sq[0]}{sq[1]}: {prev_color or 'empty'} -> {curr_color or 'empty'}")
 
     def detect_opponent_move_uci(self, prev_map, sample_count: int = 3):
         """
@@ -520,18 +654,15 @@ class GhostVision:
         Returns UCI move string like 'e2e4' or None.
         """
         try:
-            self.logger.debug(f"detect_opponent_move_uci: prev_map has {len(prev_map)} pieces")
             curr_map = self.get_board_piece_map(sample_count=sample_count)
             if not curr_map:
                 self.logger.warning("Could not detect ANY pieces on the current frame.")
-                self.logger.warning("This might be due to: wrong threshold values, board not visible, bad lighting, or highlighting interference")
                 return None
 
-            self.logger.debug(f"curr_map has {len(curr_map)} pieces, prev_map has {len(prev_map)} pieces")
+            self.logger.debug(f"Comparing: prev={len(prev_map)} pieces, curr={len(curr_map)} pieces")
             move = self.detect_move_from_maps(prev_map, curr_map)
             if not move:
-                self.logger.warning("No move pattern detected from piece comparison")
-                # Run diagnosis to understand why
+                self.logger.warning("No move pattern detected")
                 self.diagnose_piece_detection(prev_map, curr_map)
                 return None
 
@@ -545,6 +676,50 @@ class GhostVision:
             self.logger.error(traceback.format_exc())
             return None
 
+    def debug_dump_board(self, filename="debug_pieces.jpg"):
+        """
+        Save an annotated debug image showing what the vision system detects
+        on each square: piece presence and color classification.
+        """
+        if not self.board_location:
+            print("Find board first.")
+            return
+
+        frame = self.capture_screen()
+        bx, by, bw, bh = self.board_location
+        sq_size = int(self.square_size)
+        img = frame.copy()
+
+        for rank_idx in range(8):
+            for file_idx in range(8):
+                x1 = bx + file_idx * sq_size
+                y1 = by + rank_idx * sq_size
+                x2 = x1 + sq_size
+                y2 = y1 + sq_size
+
+                cell_img = frame[y1:y2, x1:x2]
+                has_piece = self._detect_piece_in_square(cell_img, rank_idx, file_idx)
+                fl, rn = self._screen_to_square(rank_idx, file_idx)
+
+                if has_piece:
+                    color = self._classify_piece_color(cell_img, rank_idx, file_idx)
+                    if color == 'w':
+                        box_color = (255, 255, 255)
+                    elif color == 'b':
+                        box_color = (0, 0, 0)
+                    else:
+                        box_color = (0, 0, 255)  # red for unknown
+                    cv2.rectangle(img, (x1 + 2, y1 + 2), (x2 - 2, y2 - 2), box_color, 3)
+                    label = f"{fl}{rn}:{color}"
+                else:
+                    label = f"{fl}{rn}"
+
+                cv2.putText(img, label, (x1 + 4, y1 + 16),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
+
+        cv2.imwrite(filename, img)
+        self.logger.log(f"Saved debug image: {filename}")
+
 
 if __name__ == "__main__":
     vision = GhostVision()
@@ -555,5 +730,11 @@ if __name__ == "__main__":
     if loc:
         print(f"Board at: {loc}")
         vision.debug_draw_board()
+        print("\nDetecting pieces...")
+        piece_map = vision.get_board_piece_map(sample_count=3)
+        print(f"Found {len(piece_map)} pieces:")
+        for sq in sorted(piece_map.keys()):
+            print(f"  {sq[0]}{sq[1]}: {piece_map[sq]}")
+        vision.debug_dump_board()
     else:
         print("Failed to detect.")

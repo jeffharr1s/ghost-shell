@@ -1,7 +1,13 @@
 import tkinter as tk
-import win32api
-import win32con
-import win32gui
+
+# Try to import Windows API modules (optional, for transparency)
+try:
+    import win32api
+    import win32con
+    import win32gui
+    HAS_WIN32 = True
+except ImportError:
+    HAS_WIN32 = False
 
 class GhostOverlay:
     def __init__(self):
@@ -30,6 +36,10 @@ class GhostOverlay:
 
     def make_click_through(self):
         """windows api magic to let clicks pass through"""
+        if not HAS_WIN32:
+            print("Warning: Windows API not available, overlay will intercept clicks")
+            return
+
         try:
             hwnd = win32gui.GetParent(self.root.winfo_id())
             styles = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)

@@ -9,6 +9,7 @@ import sys
 from core.vision import GhostVision
 from core.engine import GhostEngine
 from core.humanizer import Humanizer
+from core.openings import detect_opening
 from ui.overlay import GhostOverlay
 from utils.logger import Logger
 from utils.config import PLAYER_SIDE, THINK_TIME_MIN, THINK_TIME_MAX
@@ -40,6 +41,27 @@ class GhostShell:
             y = by + (rank_idx * sq_size) + (sq_size / 2)
 
         return int(x), int(y)
+
+    def display_move_history(self):
+        """Display all moves played so far in algebraic notation"""
+        if len(self.board.move_stack) == 0:
+            return
+
+        # Format moves in pairs (White, Black) like: 1. e2e4 e7e5 2. g1f3...
+        move_str = ""
+        for i, move in enumerate(self.board.move_stack):
+            if i % 2 == 0:  # White's move (or first player)
+                move_num = (i // 2) + 1
+                move_str += f"{move_num}. {move.uci()} "
+            else:  # Black's move
+                move_str += f"{move.uci()} "
+
+        self.logger.log(f"Game: {move_str.strip()}")
+
+        # Try to detect opening
+        opening = detect_opening(self.board)
+        if opening:
+            self.logger.log(f"Opening: {opening}")
 
     def wait_for_opponent_move(self):
         """watches screen for pixel changes - waits for stable state"""
@@ -157,6 +179,9 @@ class GhostShell:
                 f"Board locked. Playing as {'White' if self.user_side == chess.WHITE else 'Black'}."
             )
 
+            # Tell the vision system which way the board is oriented
+            self.vision.set_orientation(self.user_side)
+
             # if playing black, wait for opponent's first move
             if self.user_side == chess.BLACK:
                 self.logger.log("Playing as Black - waiting for White's first move...")
@@ -181,8 +206,15 @@ class GhostShell:
                 self.logger.debug(f"Initialized with {len(self.prev_map)} pieces")
 
             self.logger.debug("Checking if game is over...")
+            self.logger.log("Press 'D' at any time to save a debug snapshot.")
+
             while not self.board.is_game_over():
                 try:
+                    # Debug snapshot hotkey
+                    if keyboard.is_pressed('d'):
+                        self.vision.debug_dump_board()
+                        time.sleep(0.5)  # debounce
+
                     if self.board.turn == self.user_side:
                         self.logger.log("=== MY TURN ===")
                         think_time = random.uniform(THINK_TIME_MIN, THINK_TIME_MAX)
@@ -194,8 +226,23 @@ class GhostShell:
                         self.logger.debug(f"FEN: {fen}")
 
                         self.logger.debug("Requesting best move from engine...")
-                        best_move_uci = self.engine.get_human_move(fen)
-                        self.logger.debug(f"Engine returned: {best_move_uci}")
+                        best_move_uci, eval_cp = self.engine.get_human_move(fen)
+                        self.logger.debug(f"Engine returned: {best_move_uci} (eval: {eval_cp}cp)")
+
+                        # Display evaluation
+                        if eval_cp is not None:
+                            eval_score = eval_cp / 100.0
+                            if abs(eval_score) < 0.1:
+                                self.logger.log(f"[Eval: {eval_score:+.1f}] Position is roughly equal")
+                            elif eval_score > 0:
+                                self.logger.log(f"[Eval: {eval_score:+.1f}] {'White' if self.user_side == chess.WHITE else 'Black'} is winning")
+                            else:
+                                self.logger.log(f"[Eval: {eval_score:+.1f}] {'Black' if self.user_side == chess.WHITE else 'White'} is winning")
+
+                        # Display best legal moves
+                        legal_moves = list(self.board.legal_moves)
+                        self.logger.log(f"Legal moves ({len(legal_moves)} available): {' '.join([m.uci() for m in legal_moves[:15]])}" + ("..." if len(legal_moves) > 15 else ""))
+                        self.logger.log(f"Playing: {best_move_uci}")
 
                         if best_move_uci:
                             start_sq = best_move_uci[:2]
@@ -315,6 +362,7 @@ class GhostShell:
                                     self.prev_map = self.vision.get_board_piece_map()
                                     self.logger.debug(f"Board now has {len(self.prev_map)} pieces")
                                     self.logger.success(f"Opponent played: {move}")
+                                    self.display_move_history()
                                     break
                                 except ValueError as e:
                                     self.logger.error(f"Invalid move '{move}': {e}")

@@ -25,7 +25,7 @@ class GhostEngine:
         self.logger.success(f"Brain loaded. Depth: {ENGINE_DEPTH}, Contempt: {ENGINE_CONTEMPT}")
 
     def get_human_move(self, fen):
-        """returns best move, but sometimes picks 2nd best to look human"""
+        """returns (best_move, evaluation_cp) but sometimes picks 2nd best to look human"""
         try:
             self.logger.debug(f"Setting FEN position...")
             self.stockfish.set_fen_position(fen)
@@ -36,36 +36,44 @@ class GhostEngine:
             self.logger.error(f"Stockfish error: {type(e).__name__}: {e}")
             import traceback
             self.logger.error(traceback.format_exc())
-            return None
+            return None, None
 
         if not top_moves:
             self.logger.error("No top moves returned from engine!")
-            return None
+            return None, None
 
         best_move = top_moves[0]
         self.logger.debug(f"Best move: {best_move}")
-        
+
+        # extract evaluation score (in centipawns)
+        evaluation_cp = best_move.get('Centipawn')
+        if evaluation_cp is not None:
+            evaluation_cp = int(evaluation_cp)
+        else:
+            evaluation_cp = 0  # mate position, treat as 0 for display
+
         # the turing filter - if moves are close, sometimes pick #2
+        selected_move = best_move['Move']
         if len(top_moves) > 1:
             # handle mate scores (Centipawn can be None for mate positions)
             try:
                 move1_score = int(best_move.get('Centipawn') or 0)
                 move2_score = int(top_moves[1].get('Centipawn') or 0)
                 score_diff = abs(move1_score - move2_score)
-                
+
                 # 30% chance to be "different" if scores are close
                 if score_diff < 30 and random.random() < 0.3:
                     self.logger.log(f"Style move: {top_moves[1]['Move']} (diff: {score_diff})")
-                    return top_moves[1]['Move']
+                    selected_move = top_moves[1]['Move']
             except (TypeError, ValueError):
                 pass  # just use best move if score parsing fails
 
-        self.logger.log(f"Best move: {best_move['Move']}")
-        return best_move['Move']
+        self.logger.log(f"Best move: {selected_move}")
+        return selected_move, evaluation_cp
 
 if __name__ == "__main__":
     brain = GhostEngine()
     start_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
     print("Thinking...")
-    move = brain.get_human_move(start_fen)
-    print(f"Move: {move}")
+    move, eval_cp = brain.get_human_move(start_fen)
+    print(f"Move: {move}, Eval: {eval_cp}cp")

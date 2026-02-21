@@ -1,8 +1,11 @@
 import os
-from dotenv import load_dotenv
 
-# Load .env file
-load_dotenv()
+# Try to load .env file if it exists (optional)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv not installed, use environment variables or defaults
 
 # Engine Settings
 ENGINE_DEPTH = int(os.getenv("ENGINE_DEPTH", 15))
