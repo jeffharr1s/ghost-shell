@@ -345,6 +345,7 @@ class GhostVision:
         Uses edge density + variance/contrast.
 
         Works on both normal and highlighted squares.
+        Relaxed thresholds for highlighted squares to handle yellow backgrounds.
         """
         if cell_img.size == 0:
             return False
@@ -364,9 +365,24 @@ class GhostVision:
             max_val = np.max(gray)
             contrast = max_val - min_val
 
-            has_edges = edge_density >= EDGE_MIN
-            has_variance = std_dev >= STD_MIN
-            has_contrast = contrast >= CONTRAST_MIN
+            # Check if this square is highlighted (elevated saturation)
+            hsv = cv2.cvtColor(cell_img, cv2.COLOR_BGR2HSV)
+            sat_mean = float(np.mean(hsv[:, :, 1]))
+            is_highlighted = sat_mean > 45
+
+            # Use relaxed thresholds for highlighted squares
+            if is_highlighted:
+                edge_threshold = 0.03  # Relaxed from 0.04
+                std_threshold = 8.0    # Relaxed from 11.0
+                contrast_threshold = 40.0  # Relaxed from 48.0
+            else:
+                edge_threshold = EDGE_MIN
+                std_threshold = STD_MIN
+                contrast_threshold = CONTRAST_MIN
+
+            has_edges = edge_density >= edge_threshold
+            has_variance = std_dev >= std_threshold
+            has_contrast = contrast >= contrast_threshold
 
             return has_edges and (has_variance or has_contrast)
 
@@ -698,6 +714,80 @@ class GhostVision:
             return uci_move
         except Exception as e:
             self.logger.error(f"Exception in detect_opponent_move_uci: {type(e).__name__}: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+            return None
+
+    def detect_move_from_highlights(self):
+        """
+        Detect opponent move by finding yellow-highlighted squares.
+        Yellow highlights on Lichess/chess.com mark the last move (from and to squares).
+
+        The highlighted square WITH a piece is the TO square (destination).
+        The highlighted square WITHOUT a piece is the FROM square (origin).
+
+        Returns UCI move string like 'e2e4' or None if not exactly 2 highlights found.
+        """
+        try:
+            frame = self.capture_screen()
+            if frame is None:
+                self.logger.error("Could not capture screen for highlight detection")
+                return None
+
+            if not self.board_location:
+                self.logger.error("Board location not set")
+                return None
+
+            bx, by, bw, bh = self.board_location
+            sq_size = int(self.square_size)
+
+            highlighted_squares = []
+
+            # Scan all 64 squares for yellow highlights and piece presence
+            for rank_idx in range(8):
+                for file_idx in range(8):
+                    x1 = bx + file_idx * sq_size
+                    y1 = by + rank_idx * sq_size
+                    x2 = x1 + sq_size
+                    y2 = y1 + sq_size
+
+                    cell_img = frame[y1:y2, x1:x2]
+
+                    # Check if this square is highlighted (elevated saturation)
+                    hsv = cv2.cvtColor(cell_img, cv2.COLOR_BGR2HSV)
+                    sat_mean = float(np.mean(hsv[:, :, 1]))
+
+                    # Yellow highlight has saturation > 45 (consistent with _classify_piece_color)
+                    if sat_mean > 45:
+                        sq_tuple = self._screen_to_square(rank_idx, file_idx)
+                        has_piece = self._detect_piece_in_square(cell_img, rank_idx, file_idx)
+                        highlighted_squares.append((sq_tuple, has_piece))
+                        self.logger.debug(f"Found highlight on {sq_tuple[0]}{sq_tuple[1]} (saturation={sat_mean:.1f}, piece={has_piece})")
+
+            # We expect exactly 2 highlighted squares: one with piece (to), one without (from)
+            if len(highlighted_squares) != 2:
+                self.logger.warning(f"Expected 2 highlighted squares, found {len(highlighted_squares)}")
+                return None
+
+            # Separate into from (empty) and to (with piece)
+            from_sq = None
+            to_sq = None
+            for sq, has_piece in highlighted_squares:
+                if has_piece:
+                    to_sq = sq
+                else:
+                    from_sq = sq
+
+            if from_sq is None or to_sq is None:
+                self.logger.warning("Could not determine from/to squares from highlights (both have pieces or both empty?)")
+                return None
+
+            uci_move = self.square_to_uci(from_sq) + self.square_to_uci(to_sq)
+            self.logger.debug(f"Move from highlights: {from_sq[0]}{from_sq[1]} to {to_sq[0]}{to_sq[1]} = {uci_move}")
+            return uci_move
+
+        except Exception as e:
+            self.logger.error(f"Exception in detect_move_from_highlights: {type(e).__name__}: {e}")
             import traceback
             self.logger.error(traceback.format_exc())
             return None

@@ -244,6 +244,9 @@ class GhostShell:
                         self.logger.log(f"Legal moves ({len(legal_moves)} available): {' '.join([m.uci() for m in legal_moves[:15]])}" + ("..." if len(legal_moves) > 15 else ""))
                         self.logger.log(f"Playing: {best_move_uci}")
 
+                        # Store the move for later display if execution fails
+                        self.last_bot_move = best_move_uci
+
                         if best_move_uci:
                             start_sq = best_move_uci[:2]
                             end_sq = best_move_uci[2:4]
@@ -284,6 +287,8 @@ class GhostShell:
                             self.logger.success(f"Played: {best_move_uci}")
 
                             # Offer retry option if move didn't seem to register
+                            # Display the attempted move clearly at the bottom for manual execution
+                            self.logger.log(f"Bot attempted: {self.last_bot_move}")
                             self.logger.log("Press SPACE if piece didn't move, any other key to continue...")
                             if keyboard.is_pressed('space'):
                                 self.logger.warning("SPACE pressed - retrying move")
@@ -314,6 +319,18 @@ class GhostShell:
                             self.logger.debug(f"Previous board state had {len(self.prev_map)} pieces")
                             # Keep scanning a few times until a move is detected
                             for attempt in range(20):
+                                # Check for 'Y' key to manually detect from yellow highlights
+                                if keyboard.is_pressed('y'):
+                                    self.logger.log("Yellow highlight detection mode activated...")
+                                    uci_move = self.vision.detect_move_from_highlights()
+                                    if uci_move:
+                                        self.logger.success(f"Detected from yellow highlights: {uci_move}")
+                                        break
+                                    else:
+                                        self.logger.warning("Could not find exactly 2 yellow squares. Continuing auto-detect...")
+                                        time.sleep(0.25)
+                                        continue
+
                                 self.logger.debug(f"Auto-detect attempt {attempt + 1}/20...")
                                 uci_move = self.vision.detect_opponent_move_uci(self.prev_map)
                                 if uci_move:
