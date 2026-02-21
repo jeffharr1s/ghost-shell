@@ -13,7 +13,7 @@ CONTRAST_MIN = 48.0  # reasonable contrast threshold
 # Color classification: how far a piece center must deviate from the
 # known square background brightness to be called white or black.
 # This is relative to the gap between light-square and dark-square averages.
-COLOR_RATIO_THRESHOLD = 0.04  # 4% of the light-dark gap (more sensitive to piece colors)
+COLOR_RATIO_THRESHOLD = 0.08  # 8% of the light-dark gap (more lenient to catch uncertain pieces)
 
 
 class GhostVision:
@@ -435,23 +435,23 @@ class GhostVision:
             # the piece body to its own surrounding square.
             delta_from_edge = center_mean - edge_mean
 
-            if abs(delta_from_edge) > 8:
+            if abs(delta_from_edge) > 6:
                 # Strong signal: piece is clearly different from its background
-                if delta_from_edge > 8:
+                if delta_from_edge > 6:
                     return 'w'  # piece brighter than background = white piece
                 else:
                     return 'b'  # piece darker than background = black piece
 
             # --- Strategy 2: Absolute brightness (for highlighted/ambiguous) ---
             if is_highlighted:
-                if center_mean > 160:
+                if center_mean > 155:
                     return 'w'
-                elif center_mean < 100:
+                elif center_mean < 105:
                     return 'b'
                 # Still ambiguous with highlight - use a slightly relaxed edge delta
-                if delta_from_edge > 7:
+                if delta_from_edge > 5:
                     return 'w'
-                elif delta_from_edge < -7:
+                elif delta_from_edge < -5:
                     return 'b'
                 return '?'
 
@@ -478,9 +478,9 @@ class GhostVision:
                 return 'b'
 
             # --- Last resort: absolute brightness ---
-            if center_mean > 170:
+            if center_mean > 160:
                 return 'w'
-            elif center_mean < 90:
+            elif center_mean < 100:
                 return 'b'
 
             # If we got here, we can't confidently classify the piece
