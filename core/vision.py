@@ -6,9 +6,9 @@ import chess
 from utils.logger import Logger
 
 # Piece detection thresholds
-EDGE_MIN = 0.02
-STD_MIN = 8.0
-CONTRAST_MIN = 40.0
+EDGE_MIN = 0.05  # increased from 0.02 - need stronger edge density for a real piece
+STD_MIN = 12.0   # increased from 8.0 - real pieces have more variance
+CONTRAST_MIN = 50.0  # increased from 40.0 - need stronger contrast
 
 # Color classification: how far a piece center must deviate from the
 # known square background brightness to be called white or black.
@@ -405,23 +405,23 @@ class GhostVision:
             # the piece body to its own surrounding square.
             delta_from_edge = center_mean - edge_mean
 
-            if abs(delta_from_edge) > 10:
+            if abs(delta_from_edge) > 12:
                 # Strong signal: piece is clearly different from its background
-                if delta_from_edge > 10:
+                if delta_from_edge > 12:
                     return 'w'  # piece brighter than background = white piece
                 else:
                     return 'b'  # piece darker than background = black piece
 
             # --- Strategy 2: Absolute brightness (for highlighted/ambiguous) ---
             if is_highlighted:
-                if center_mean > 150:
+                if center_mean > 160:
                     return 'w'
-                elif center_mean < 110:
+                elif center_mean < 100:
                     return 'b'
                 # Still ambiguous with highlight - use a slightly relaxed edge delta
-                if delta_from_edge > 5:
+                if delta_from_edge > 7:
                     return 'w'
-                elif delta_from_edge < -5:
+                elif delta_from_edge < -7:
                     return 'b'
                 return '?'
 
@@ -448,17 +448,13 @@ class GhostVision:
                 return 'b'
 
             # --- Last resort: absolute brightness ---
-            if center_mean > 165:
+            if center_mean > 170:
                 return 'w'
-            elif center_mean < 95:
+            elif center_mean < 90:
                 return 'b'
 
-            # --- Final fallback: if we're on a light square, piece is probably white ---
-            # --- if on dark square, piece is probably black ---
-            if is_light_square:
-                return 'b'  # piece on light square is likely black
-            else:
-                return 'w'  # piece on dark square is likely white
+            # If we got here, we can't confidently classify the piece
+            return '?'
 
         except Exception as e:
             self.logger.error(f"Color classify error at {file_idx},{rank_idx}: {e}")
