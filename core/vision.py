@@ -6,9 +6,9 @@ import chess
 from utils.logger import Logger
 
 # Piece detection thresholds
-EDGE_MIN = 0.05  # increased from 0.02 - need stronger edge density for a real piece
-STD_MIN = 12.0   # increased from 8.0 - real pieces have more variance
-CONTRAST_MIN = 50.0  # increased from 40.0 - need stronger contrast
+EDGE_MIN = 0.03  # need strong edge density but not too strict
+STD_MIN = 10.0   # real pieces have variance
+CONTRAST_MIN = 45.0  # need contrast to distinguish from background
 
 # Color classification: how far a piece center must deviate from the
 # known square background brightness to be called white or black.
@@ -335,11 +335,22 @@ class GhostVision:
         """
         Returns True if a piece is likely present in this cell.
         Uses edge density + variance/contrast.
+
+        Ignores highlighted squares (from move indicators) to avoid false positives.
         """
         if cell_img.size == 0:
             return False
 
         try:
+            # Check if square is highlighted - if so, skip it to avoid false positives
+            hsv = cv2.cvtColor(cell_img, cv2.COLOR_BGR2HSV)
+            sat_mean = float(np.mean(hsv[:, :, 1]))
+            is_highlighted = sat_mean > 45
+
+            if is_highlighted:
+                # Skip highlighted squares - they cause false piece detections
+                return False
+
             gray = cv2.cvtColor(cell_img, cv2.COLOR_BGR2GRAY)
             edges = cv2.Canny(gray, 30, 100)
             edge_density = np.count_nonzero(edges) / edges.size
