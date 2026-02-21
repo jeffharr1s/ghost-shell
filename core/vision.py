@@ -45,8 +45,16 @@ class GhostVision:
         self._calibrate_square_colors()
 
     def capture_screen(self):
-        img = np.array(self.sct.grab(self.monitor))
-        return cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+        try:
+            img = np.array(self.sct.grab(self.monitor))
+            if img.size == 0:
+                self.logger.error("Screen capture returned empty image")
+                return None
+            result = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+            return result
+        except Exception as e:
+            self.logger.error(f"Screen capture failed: {e}")
+            return None
 
     def find_board(self):
         """tries multiple methods to find the board"""
@@ -342,6 +350,10 @@ class GhostVision:
             return False
 
         try:
+            # Sanity check on image size to avoid hanging on corrupted frames
+            if cell_img.shape[0] < 4 or cell_img.shape[1] < 4:
+                return False
+
             gray = cv2.cvtColor(cell_img, cv2.COLOR_BGR2GRAY)
             edges = cv2.Canny(gray, 30, 100)
             edge_density = np.count_nonzero(edges) / edges.size
@@ -483,6 +495,9 @@ class GhostVision:
             all_maps = []
             for idx in range(sample_count):
                 frame = self.capture_screen()
+                if frame is None:
+                    self.logger.error("Failed to capture frame, skipping")
+                    continue
                 piece_map = {}
 
                 for rank_idx in range(8):
