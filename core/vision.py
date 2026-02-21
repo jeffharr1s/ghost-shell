@@ -13,7 +13,7 @@ CONTRAST_MIN = 48.0  # reasonable contrast threshold
 # Color classification: how far a piece center must deviate from the
 # known square background brightness to be called white or black.
 # This is relative to the gap between light-square and dark-square averages.
-COLOR_RATIO_THRESHOLD = 0.06  # 6% of the light-dark gap (lowered from 10%, more sensitive)
+COLOR_RATIO_THRESHOLD = 0.04  # 4% of the light-dark gap (more sensitive to piece colors)
 
 
 class GhostVision:
@@ -407,9 +407,9 @@ class GhostVision:
             # the piece body to its own surrounding square.
             delta_from_edge = center_mean - edge_mean
 
-            if abs(delta_from_edge) > 12:
+            if abs(delta_from_edge) > 8:
                 # Strong signal: piece is clearly different from its background
-                if delta_from_edge > 12:
+                if delta_from_edge > 8:
                     return 'w'  # piece brighter than background = white piece
                 else:
                     return 'b'  # piece darker than background = black piece
