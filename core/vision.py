@@ -5,10 +5,10 @@ import time
 import chess
 from utils.logger import Logger
 
-# Piece detection thresholds - STRICT to avoid false positives on empty squares
-EDGE_MIN = 0.08  # real pieces have dense edges from the carved details
-STD_MIN = 15.0   # real pieces have significant brightness variation
-CONTRAST_MIN = 60.0  # strong contrast between piece and background
+# Piece detection thresholds - balanced to catch all pieces without false positives
+EDGE_MIN = 0.04  # pieces have noticeable edges
+STD_MIN = 11.0   # real pieces have variance
+CONTRAST_MIN = 48.0  # reasonable contrast threshold
 
 # Color classification: how far a piece center must deviate from the
 # known square background brightness to be called white or black.
