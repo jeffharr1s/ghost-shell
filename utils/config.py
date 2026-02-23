@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Version (Semantic Versioning)
-APP_VERSION = "0.1.2"  # v0.1.2 - auto yellow detection on every move, no focus switching needed
+APP_VERSION = "0.2.0"  # v0.2.0 - permutation yellow detection, filter stale highlights, fix timeout trap
 
 # Engine Settings
 ENGINE_DEPTH = int(os.getenv("ENGINE_DEPTH", 15))

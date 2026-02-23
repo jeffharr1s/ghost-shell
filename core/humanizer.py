@@ -58,41 +58,22 @@ class Humanizer:
         pyautogui.mouseUp()
 
     def make_move(self, start_coords, end_coords, promotion_piece=None, square_size=None, player_is_white=True):
-        """DRAG piece to square (Lichess requires drag-and-drop)"""
-        try:
-            self.logger.log(f"Making move from {start_coords} to {end_coords}")
-
-            # Move to starting square
-            self.logger.debug(f"Moving mouse to start: {start_coords}")
-            self.move_mouse(*start_coords)
-            time.sleep(random.uniform(0.05, 0.1))
-
-            # Press and hold mouse button (pick up piece)
-            self.logger.debug("Pressing mouse button (picking up piece)...")
-            pyautogui.mouseDown()
-            time.sleep(random.uniform(0.1, 0.2))
-
-            # Drag to destination
-            self.logger.debug(f"Dragging to destination: {end_coords}")
-            self.move_mouse(*end_coords)
-            time.sleep(random.uniform(0.1, 0.2))
-
-            # Release mouse button (drop piece)
-            self.logger.debug("Releasing mouse button (dropping piece)...")
-            pyautogui.mouseUp()
-
-            if promotion_piece:
-                self.logger.log(f"Handling promotion: {promotion_piece}")
-                time.sleep(random.uniform(0.2, 0.4))
-                self._click_promotion_piece(end_coords, promotion_piece, square_size, player_is_white)
-                self.logger.debug("Promotion handled.")
-
-            self.logger.success("Move complete.")
-        except Exception as e:
-            self.logger.error(f"Error during move: {type(e).__name__}: {e}")
-            import traceback
-            self.logger.error(traceback.format_exc())
-            raise
+        """click piece, drag to square, handle promotion if needed"""
+        self.logger.log("Making move...")
+        
+        self.move_mouse(*start_coords)
+        self.click()
+        
+        time.sleep(random.uniform(0.1, 0.3))
+        
+        self.move_mouse(*end_coords)
+        self.click()
+        
+        if promotion_piece:
+            time.sleep(random.uniform(0.2, 0.4))
+            self._click_promotion_piece(end_coords, promotion_piece, square_size, player_is_white)
+        
+        self.logger.success("Done.")
     
     def _click_promotion_piece(self, square_coords, piece, square_size=None, player_is_white=True):
         """clicks on the promotion popup. order is queen, rook, bishop, knight"""

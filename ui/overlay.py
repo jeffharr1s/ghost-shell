@@ -1,13 +1,7 @@
 import tkinter as tk
-
-# Try to import Windows API modules (optional, for transparency)
-try:
-    import win32api
-    import win32con
-    import win32gui
-    HAS_WIN32 = True
-except ImportError:
-    HAS_WIN32 = False
+import win32api
+import win32con
+import win32gui
 
 class GhostOverlay:
     def __init__(self):
@@ -36,16 +30,20 @@ class GhostOverlay:
 
     def make_click_through(self):
         """windows api magic to let clicks pass through"""
-        if not HAS_WIN32:
-            print("Warning: Windows API not available, overlay will intercept clicks")
-            return
-
         try:
-            hwnd = win32gui.GetParent(self.root.winfo_id())
+            # winfo_id() IS the top-level HWND for a Tk root window
+            hwnd = self.root.winfo_id()
             styles = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
-            win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, styles | win32con.WS_EX_LAYERED | win32con.WS_EX_TRANSPARENT)
+            win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE,
+                                   styles | win32con.WS_EX_LAYERED | win32con.WS_EX_TRANSPARENT)
+            # also try parent in case tkinter wraps it (some versions do)
+            parent = win32gui.GetParent(hwnd)
+            if parent:
+                pstyles = win32gui.GetWindowLong(parent, win32con.GWL_EXSTYLE)
+                win32gui.SetWindowLong(parent, win32con.GWL_EXSTYLE,
+                                       pstyles | win32con.WS_EX_LAYERED | win32con.WS_EX_TRANSPARENT)
         except Exception as e:
-            print(f"Warning: click-through failed. {e}")
+            print(f"Warning: click-through failed: {e}")
 
     def update_geometry(self, x, y, width, height):
         """snaps overlay to board position"""
