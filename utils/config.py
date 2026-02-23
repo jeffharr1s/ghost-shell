@@ -1,11 +1,11 @@
 import os
+from dotenv import load_dotenv
 
-# Try to load .env file if it exists (optional)
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass  # dotenv not installed, use environment variables or defaults
+# Load .env file
+load_dotenv()
+
+# Version (Semantic Versioning)
+APP_VERSION = "0.1.2"  # v0.1.2 - auto yellow detection on every move, no focus switching needed
 
 # Engine Settings
 ENGINE_DEPTH = int(os.getenv("ENGINE_DEPTH", 15))
