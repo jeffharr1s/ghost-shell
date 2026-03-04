@@ -11,7 +11,7 @@ from core.engine import GhostEngine
 from core.humanizer import Humanizer
 from ui.overlay import GhostOverlay
 from utils.logger import Logger
-from utils.config import PLAYER_SIDE, THINK_TIME_MIN, THINK_TIME_MAX, APP_VERSION
+from utils.config import PLAYER_SIDE, THINK_TIME_MIN, THINK_TIME_MAX, APP_VERSION, GAME_MODE_PRESETS
 
 class GhostShell:
     def __init__(self):
@@ -23,6 +23,7 @@ class GhostShell:
         self.board = chess.Board()
         self.user_side = chess.WHITE
         self.last_move = None  # stores last bot move for redo: (uci, start_coords, end_coords, promo, sq_size, is_white)
+        self.timing = GAME_MODE_PRESETS["RAPID"]  # default; overridden at startup
 
     def get_square_center(self, square_name):
         """converts 'e4' to screen coords"""
@@ -83,10 +84,10 @@ class GhostShell:
     def _try_yellow_then_manual(self):
         """auto-scans yellow highlights with retries; falls back to manual input if all attempts fail"""
         max_attempts = 5
-        retry_delay = 1.2  # seconds between scans
+        retry_delay = self.timing["yellow_retry"]
 
         for attempt in range(1, max_attempts + 1):
-            wait = 1.0 if attempt == 1 else retry_delay
+            wait = self.timing["yellow_wait"] if attempt == 1 else retry_delay
             self.logger.log(f"Yellow scan attempt {attempt}/{max_attempts} (waiting {wait}s)...")
             time.sleep(wait)
             if self._try_yellow_once():
@@ -152,7 +153,7 @@ class GhostShell:
         self.logger.log("Press 'R' to retry bot move | 'Y' for yellow detect | 'Q' to quit")
 
         # wait a bit for our own animation to finish
-        time.sleep(1.0)
+        time.sleep(self.timing["settle"])
         previous_state_img = self.vision.capture_screen()
 
         attempt = 0
@@ -173,7 +174,7 @@ class GhostShell:
                 time.sleep(0.5)  # debounce
                 return "yellow"
 
-            time.sleep(0.8)
+            time.sleep(self.timing["poll"])
             current_state_img = self.vision.capture_screen()
 
             diff = cv2.absdiff(previous_state_img, current_state_img)
@@ -183,7 +184,7 @@ class GhostShell:
 
             if non_zero > 1000:  # higher threshold
                 self.logger.success("Movement detected!")
-                time.sleep(1.0)  # wait for animation to fully finish
+                time.sleep(self.timing["settle"])  # wait for animation to fully finish
                 return True
 
             # update baseline
@@ -197,7 +198,19 @@ class GhostShell:
                 
     def run(self):
         self.logger.log(f"Initializing Ghost-Shell v{APP_VERSION}...")
-        
+
+        # game mode — sets all timing presets
+        print("\n" + "="*50)
+        print("  Game Mode:")
+        print("  [1] Blitz   (0.2-0.8s think, fast polling)")
+        print("  [2] Rapid   (1.0-3.5s think)  [default]")
+        print("  [3] Classic (2.0-7.0s think)")
+        print("="*50)
+        mode_input = input("Select mode [1/2/3 or Enter]: ").strip()
+        mode_key = {"1": "BLITZ", "2": "RAPID", "3": "CLASSIC"}.get(mode_input, "RAPID")
+        self.timing = GAME_MODE_PRESETS[mode_key]
+        self.logger.success(f"Mode: {mode_key} — think {self.timing['think_min']}-{self.timing['think_max']}s")
+
         # ask user which side they're playing
         print("\n" + "="*50)
         print("Which side are you playing?")
@@ -275,7 +288,7 @@ class GhostShell:
         while not self.board.is_game_over():
             
             if self.board.turn == self.user_side:
-                think_time = random.uniform(THINK_TIME_MIN, THINK_TIME_MAX)
+                think_time = random.uniform(self.timing["think_min"], self.timing["think_max"])
                 self.logger.log(f"My turn. Thinking for {think_time:.1f}s...")
                 time.sleep(think_time)
                 
