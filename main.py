@@ -219,9 +219,8 @@ class GhostShell:
             # will try auto-detect after board found
             pass
         
-        self.logger.warning("Make sure the board is visible.")
-        self.logger.warning("Press 'S' to start.")
-        keyboard.wait('s')
+        self.logger.warning("Make sure the board is fully visible, then press Enter.")
+        input()
         
         location = self.vision.find_board()
         if not location:
