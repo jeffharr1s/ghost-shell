@@ -56,11 +56,11 @@ python main.py
 
 1. Open chess.com or lichess or whatever
 2. Make sure the board is visible
-3. Choose W/B/A when prompted (White/Black/Auto)
-4. Press `S` to start
+3. Paste a FEN and press Enter to resume, or press Enter on a blank prompt for a new game
+4. Let it auto-detect the board and your side from the bottom of the board
 5. Let it do its thing
 
-Press `Q` to quit. Or slam mouse to corner - theres a failsafe.
+Press `Q` to quit, or `N` while waiting for the opponent to restart `main.py` for a new game. In manual move prompts, type `new` or `restart` to relaunch. Or slam mouse to corner - theres a failsafe.
 
 ---
 
@@ -99,7 +99,16 @@ THINK_TIME_MIN=1.5       # seconds
 THINK_TIME_MAX=6.0
 
 PLAYER_SIDE=AUTO         # AUTO / WHITE / BLACK
+
+QUICK_START=false        # true skips the first FEN/new-game prompt
+DEFAULT_GAME_MODE=RAPID  # BLITZ / RAPID / CLASSIC
+DEFAULT_START_MODE=N     # N = new game, F = resume from FEN
+PAUSE_ON_EXIT=true       # keep console open after errors/exits
 ```
+
+The current run log is always written to `COPY_THIS_LOG.txt` in the project folder. If the app crashes, paste that one file into chat so it can be reviewed.
+
+Startup now defaults hard toward speed: paste FEN to resume, blank Enter means new game, game mode comes from `DEFAULT_GAME_MODE`, and your side is inferred from whichever color is at the bottom of the visible board.
 
 ---
 

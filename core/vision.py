@@ -161,35 +161,46 @@ class GhostVision:
         return None
     
     def detect_player_side(self):
-        """figures out if youre white or black by checking corner brightness"""
+        """Detects side by comparing rank label edge complexity at top vs bottom.
+        chess.com shows rank '1' (single stroke, few edges) at the bottom for White,
+        and rank '8' (two ovals, many edges) at the bottom for Black."""
         import chess
-        
+
         if not self.board_location:
             self.logger.error("Find the board first.")
             return None
-        
-        bottom_left = self.get_square_roi(7, 0)
-        bottom_right = self.get_square_roi(7, 7)
-        
-        if bottom_left is None or bottom_right is None:
-            return None
-        
-        h, w = bottom_left.shape[:2]
-        center_left = bottom_left[h//4:3*h//4, w//4:3*w//4]
-        center_right = bottom_right[h//4:3*h//4, w//4:3*w//4]
-        
-        gray_left = cv2.cvtColor(center_left, cv2.COLOR_BGR2GRAY)
-        gray_right = cv2.cvtColor(center_right, cv2.COLOR_BGR2GRAY)
-        
-        avg_left = np.mean(gray_left)
-        avg_right = np.mean(gray_right)
-        
-        if avg_left > 120 or avg_right > 120:
-            self.logger.success("Playing as WHITE")
-            return chess.WHITE
-        else:
-            self.logger.success("Playing as BLACK")
+
+        frame = self.capture_screen()
+        bx, by, bw, bh = self.board_location
+        sq_s = int(self.square_size)
+
+        # Sample the leftmost quarter of the top and bottom rows —
+        # that's where chess.com renders the rank coordinate labels.
+        label_col = max(sq_s // 4, 15)
+
+        top_roi    = frame[by              : by + sq_s,         bx : bx + label_col]
+        bottom_roi = frame[by + 7 * sq_s   : by + 8 * sq_s,     bx : bx + label_col]
+
+        def edge_count(roi):
+            if roi.size == 0:
+                return 0
+            gray  = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+            edges = cv2.Canny(gray, 50, 150)
+            return cv2.countNonZero(edges)
+
+        top_edges    = edge_count(top_roi)
+        bottom_edges = edge_count(bottom_roi)
+
+        self.logger.log(f"Rank label edges — top: {top_edges}, bottom: {bottom_edges}")
+
+        # '8' (two ovals) has significantly more edges than '1' (one stroke).
+        # More edges at bottom  →  '8' at bottom  →  Black's view.
+        if bottom_edges > top_edges:
+            self.logger.success("Bottom side detected as BLACK")
             return chess.BLACK
+        else:
+            self.logger.success("Bottom side detected as WHITE")
+            return chess.WHITE
 
     def get_square_roi(self, rank, file):
         """gets image of a specific square"""
@@ -207,7 +218,7 @@ class GhostVision:
         full_screen = self.capture_screen()
         return full_screen[y_start:y_end, x_start:x_end]
 
-    def detect_yellow_highlights(self):
+    def detect_yellow_highlights(self, is_white=True):
         """
         Detects yellow-highlighted squares on the board (marks the last move made).
 
@@ -248,8 +259,15 @@ class GhostVision:
 
                 # More than 30% of the square must be yellow
                 if yellow_count > (sq_size * sq_size * 0.3):
-                    file = chr(ord('a') + file_idx)
-                    rank = str(8 - rank_idx)
+                    # When playing Black the board is rotated 180° — both files AND ranks flip.
+                    # White: a-file on left (file_idx=0), rank 8 at top (rank_idx=0)
+                    # Black: h-file on left (file_idx=0), rank 1 at top (rank_idx=0)
+                    if is_white:
+                        file = chr(ord('a') + file_idx)
+                        rank = str(8 - rank_idx)
+                    else:
+                        file = chr(ord('h') - file_idx)
+                        rank = str(rank_idx + 1)
                     square = f"{file}{rank}"
                     yellow_squares.append(square)
                     self.logger.log(f"Yellow at {square}")

@@ -19,6 +19,8 @@ ENV/
 
 # Debug files
 debug_vision.jpg
+logs/
+COPY_THIS_LOG.txt
 
 # OS
 .DS_Store

@@ -5,7 +5,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Version (Semantic Versioning)
-APP_VERSION = "0.2.0"  # v0.2.0 - permutation yellow detection, filter stale highlights, fix timeout trap
+APP_VERSION = "0.4.0"  # v0.4.0 - FEN-first startup, restart flow, copy/paste logs
+
+
+def _env_bool(name, default=False):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in ("1", "true", "yes", "y", "on")
 
 # Engine Settings
 ENGINE_DEPTH = int(os.getenv("ENGINE_DEPTH", 15))
@@ -25,6 +32,18 @@ GAME_MODE_PRESETS = {
     "RAPID":   {"think_min": 1.0, "think_max": 3.5,  "poll": 0.5,  "settle": 0.7, "yellow_wait": 0.7, "yellow_retry": 0.8},
     "CLASSIC": {"think_min": 2.0, "think_max": 7.0,  "poll": 0.8,  "settle": 1.0, "yellow_wait": 1.0, "yellow_retry": 1.2},
 }
+
+# Startup defaults. QUICK_START skips the FEN/new-game question and uses these values.
+DEFAULT_GAME_MODE = os.getenv("DEFAULT_GAME_MODE", "RAPID").upper()
+if DEFAULT_GAME_MODE not in GAME_MODE_PRESETS:
+    DEFAULT_GAME_MODE = "RAPID"
+
+QUICK_START = _env_bool("QUICK_START", False)
+DEFAULT_START_MODE = os.getenv("DEFAULT_START_MODE", "N").upper()
+if DEFAULT_START_MODE not in ("N", "F"):
+    DEFAULT_START_MODE = "N"
+
+PAUSE_ON_EXIT = _env_bool("PAUSE_ON_EXIT", True)
 
 # Player Side: "AUTO", "WHITE", or "BLACK"
 PLAYER_SIDE = os.getenv("PLAYER_SIDE", "AUTO").upper()
