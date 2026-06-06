@@ -11,7 +11,7 @@ from core.vision import GhostVision
 from core.engine import GhostEngine
 from core.humanizer import Humanizer
 from ui.overlay import GhostOverlay
-from utils.logger import Logger
+from utils.logger import Logger, Colors
 from utils.config import (
     PLAYER_SIDE,
     APP_VERSION,
@@ -20,6 +20,12 @@ from utils.config import (
     QUICK_START,
     DEFAULT_START_MODE,
     PAUSE_ON_EXIT,
+    USE_BROWSER,
+    CHESS_URL,
+    BROWSER_CHANNEL,
+    CDP_PORT,
+    CHROME_PATH,
+    YELLOW_MAX_ATTEMPTS,
 )
 
 
@@ -35,6 +41,15 @@ class GhostShell:
         self.humanizer = Humanizer()
         self.overlay = GhostOverlay()
         self.board = chess.Board()
+        # Optional CDP move driver. Lazy-imported so the legacy pyautogui path
+        # never requires Playwright to be installed.
+        self.browser = None
+        if USE_BROWSER:
+            from core.browser import GhostBrowser
+            self.browser = GhostBrowser(
+                start_url=CHESS_URL, channel=BROWSER_CHANNEL,
+                cdp_port=CDP_PORT, chrome_path=CHROME_PATH,
+            )
         self.user_side = chess.WHITE
         self.last_move = None  # stores last bot move for redo: (uci, start_coords, end_coords, promo, sq_size, is_white)
         self.baseline_yellow = set()  # yellow squares captured right after our move (stale highlights to ignore)
@@ -119,16 +134,19 @@ class GhostShell:
             
         return int(x), int(y)
 
-    def _try_yellow_once(self):
+    def _try_yellow_once(self, quiet=False):
         """tries yellow detection once, attempting all permutations of detected squares.
         filters out bot's own last-move squares to remove stale highlights.
-        returns True if a valid move was pushed, False otherwise."""
+        returns True if a valid move was pushed, False otherwise.
+        quiet=True suppresses the per-scan chatter so the patient loop can own the coloring."""
         yellow_squares = self.vision.detect_yellow_highlights(is_white=(self.user_side == chess.WHITE))
         if not yellow_squares:
-            self.logger.warning("No yellow squares detected")
+            if not quiet:
+                self.logger.warning("No yellow squares detected")
             return False
 
-        self.logger.log(f"Yellow squares: {yellow_squares}")
+        if not quiet:
+            self.logger.log(f"Yellow squares: {yellow_squares}")
 
         # filter out bot's own last-move squares - chess.com keeps them highlighted,
         # so after we play e2e4 and wait for the opponent, e2 and e4 stay yellow
@@ -140,14 +158,16 @@ class GhostShell:
             filtered = [sq for sq in yellow_squares if sq not in (bot_from, bot_to)]
             if len(filtered) >= 2:
                 candidates = filtered
-                self.logger.log(f"Filtered bot squares ({bot_from},{bot_to}), using: {candidates}")
+                if not quiet:
+                    self.logger.log(f"Filtered bot squares ({bot_from},{bot_to}), using: {candidates}")
 
         # also subtract squares captured in our post-move baseline snapshot (persistent stale highlights)
         if self.baseline_yellow:
             fresh = [sq for sq in candidates if sq not in self.baseline_yellow]
             if len(fresh) >= 2:
                 candidates = fresh
-                self.logger.log(f"Filtered baseline {self.baseline_yellow}, using: {candidates}")
+                if not quiet:
+                    self.logger.log(f"Filtered baseline {self.baseline_yellow}, using: {candidates}")
 
         # try every ordered pair - handles reversed direction AND 3-square stale highlight cases
         for from_sq, to_sq in itertools.permutations(candidates, 2):
@@ -161,27 +181,61 @@ class GhostShell:
             except ValueError:
                 pass
 
-        self.logger.error(f"No valid move among yellow squares {candidates}")
+        if not quiet:
+            # yellow, not red - "no valid move yet" is normal while waiting, not an error
+            self.logger.warning(f"No valid move among yellow squares {candidates}")
         return False
 
     def _try_yellow_then_manual(self):
-        """auto-scans yellow highlights with retries; falls back to manual input if all attempts fail"""
-        max_attempts = 5
+        """Waits for the opponent's move (a fresh yellow highlight) for as long as it
+        takes - by default it NEVER drops to manual on its own. _try_yellow_once()
+        ignores our own last-move highlight, so a stale board yields no valid move and
+        we just keep watching until the opponent actually moves, then play it instantly.
+        Press 'M' for manual entry, 'N' new game, 'Q' quit. (YELLOW_MAX_ATTEMPTS > 0
+        caps the wait; 0 = wait forever.)"""
+        max_attempts = YELLOW_MAX_ATTEMPTS  # 0 = indefinite
         retry_delay = self.timing["yellow_retry"]
+        orange_after = 5  # first few scans are calm yellow; escalate to orange after this
 
-        for attempt in range(1, max_attempts + 1):
-            wait = self.timing["yellow_wait"] if attempt == 1 else retry_delay
-            self.logger.log(f"Yellow scan attempt {attempt}/{max_attempts} (waiting {wait}s)...")
-            time.sleep(wait)
-            if self._try_yellow_once():
+        self.logger.warning("Watching for the opponent's move - being patient. "
+                            "Press 'M' for manual entry, 'N' new game, 'Q' quit.")
+
+        first, scans = True, 0
+        while max_attempts <= 0 or scans < max_attempts:
+            if keyboard.is_pressed('q'):
+                self.logger.warning("Quit.")
+                sys.exit(0)
+            if keyboard.is_pressed('n'):
+                time.sleep(0.5)  # debounce
+                raise RestartMainRequested
+            if keyboard.is_pressed('m'):
+                self.logger.warning("Manual entry requested.")
+                time.sleep(0.5)  # debounce
+                break
+
+            time.sleep(self.timing["yellow_wait"] if first else retry_delay)
+            first = False
+            if self._try_yellow_once(quiet=True):
+                # opponent moved - happy green "your move" signal
+                self.logger.success("Opponent moved - got it! Your move, go ahead. ✅")
                 return
-            self.logger.error(f"Attempt {attempt}: no valid move found, retrying...")
+            scans += 1
+            cap = f"/{max_attempts}" if max_attempts > 0 else ""
+            if scans >= orange_after:
+                # been a while - escalate to orange and say we're retrying
+                self.logger.orange(f"No valid move among yellow squares yet - retrying... (attempt {scans}{cap})")
+            else:
+                # calm yellow - totally normal, opponent just hasn't moved yet
+                self.logger.warning(f"No valid move among yellow squares yet (attempt {scans}{cap})")
 
-        self.logger.error(f"Yellow failed after {max_attempts} attempts - enter move manually")
+        # red - we genuinely gave up after the patience cap
+        self.logger.error(f"Yellow failed after {scans} attempts - enter move manually")
 
-        # fallback: manual input (only reached if yellow failed)
+        # fallback: manual input (only reached if yellow failed). Prompt in red.
         while True:
-            move = input("Opponent's move (e.g. e2e4), [Enter]/'y'=yellow, 'r'=redo, 'd'=diag, 'f'=FEN, 's'=I moved, 'new'=restart, 'q'=quit: ").strip().lower()
+            prompt = ("Opponent's move (e.g. e2e4), [Enter]/'y'=yellow, 'r'=redo, 'd'=diag, "
+                      "'f'=FEN, 's'=I moved, 'new'=restart, 'q'=quit: ")
+            move = input(f"{Colors.FAIL}{prompt}{Colors.ENDC}").strip().lower()
             if move in ('q', 'quit', 'exit') or move.startswith('q '):
                 self.logger.warning("Quit.")
                 sys.exit(0)
@@ -240,22 +294,37 @@ class GhostShell:
         self.overlay.draw_move_arrow(start_coords, end_coords)
         time.sleep(0.3)
         self.overlay.clear()  # clear before clicking
-        self.humanizer.make_move(start_coords, end_coords, promo, sq_size, is_white)
+        if self.browser:
+            self.browser.make_move(uci, is_white)
+        else:
+            self.humanizer.make_move(start_coords, end_coords, promo, sq_size, is_white)
         self.board.push_uci(uci)
         self.logger.success(f"Replayed: {uci}")
         return True
 
+    def _capture_board_region(self):
+        """Captures only the board rectangle. The clock and animated ads change pixels
+        every second; cropping to the board means we only react to actual moves."""
+        frame = self.vision.capture_screen()
+        loc = self.vision.board_location
+        if not loc:
+            return frame
+        bx, by, bw, bh = loc
+        return frame[by:by + bh, bx:bx + bw]
+
     def wait_for_opponent_move(self):
-        """watches screen for pixel changes - waits for stable state"""
+        """watches the BOARD region for pixel changes - waits for stable state"""
         self.logger.log("Waiting for opponent...")
         self.logger.log("Press 'R' to retry bot move | 'Y' for yellow detect | 'N' for new game/restart | 'Q' to quit")
 
         # wait a bit for our own animation to finish
         time.sleep(self.timing["settle"])
-        previous_state_img = self.vision.capture_screen()
+        previous_state_img = self._capture_board_region()
 
         attempt = 0
-        max_attempts = 20
+        # Watch only the board, so clock/ads don't false-trigger. That makes it safe
+        # to wait a long time - opponents can take minutes - before falling to manual.
+        max_attempts = 600
 
         while attempt < max_attempts:
             if keyboard.is_pressed('q'):
@@ -278,7 +347,7 @@ class GhostShell:
                 return "yellow"
 
             time.sleep(self.timing["poll"])
-            current_state_img = self.vision.capture_screen()
+            current_state_img = self._capture_board_region()
 
             diff = cv2.absdiff(previous_state_img, current_state_img)
             gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
@@ -305,7 +374,16 @@ class GhostShell:
 
         mode, fen_str = self._choose_start_mode()
         self._apply_default_game_mode()
-        
+
+        if self.browser:
+            # Launch the browser the bot will click into; wait until you've logged
+            # in and opened a game so a board exists before vision tries to read it.
+            self.browser.start()
+            self.logger.warning("Log into chess.com and open a game in the launched browser window...")
+            if not self.browser.wait_for_board():
+                self.logger.error("No board appeared in the browser. Exiting.")
+                return
+
         if QUICK_START:
             self.logger.warning("Quick start: looking for the board immediately.")
         else:
@@ -366,7 +444,10 @@ class GhostShell:
                     time.sleep(0.3)
                     self.overlay.clear()  # clear first - overlay could eat clicks if click-through fails
 
-                    self.humanizer.make_move(start_coords, end_coords, promotion_piece, sq_size, is_white)
+                    if self.browser:
+                        self.browser.make_move(best_move_uci, is_white)
+                    else:
+                        self.humanizer.make_move(start_coords, end_coords, promotion_piece, sq_size, is_white)
                     self.board.push_uci(best_move_uci)
                     self.last_move = (best_move_uci, start_coords, end_coords, promotion_piece, sq_size, is_white)
                     self._capture_baseline()  # snapshot our move's highlights so they're filtered next scan
@@ -442,12 +523,15 @@ def main():
     logger = Logger("BOOT")
     exit_code = 0
     should_pause = True
+    bot = None
     try:
         bot = GhostShell()
         bot.run()
     except RestartMainRequested:
         try:
             should_pause = False
+            if bot and bot.browser:
+                bot.browser.close()  # release the profile lock before relaunch
             _restart_main_py(logger)
         except Exception as exc:
             should_pause = True
@@ -467,6 +551,8 @@ def main():
         logger.error(f"Crash details were saved here for copy/paste: {Logger.current_log_path()}")
         exit_code = 1
     finally:
+        if bot and bot.browser:
+            bot.browser.close()
         if should_pause:
             _pause_before_exit(logger, "Ghost-Shell finished. The console will stay open so you can read any errors.")
 

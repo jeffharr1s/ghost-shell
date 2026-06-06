@@ -42,6 +42,7 @@ Ghost-Shell watches your screen, finds the chessboard, thinks with Stockfish, th
 git clone https://github.com/zoecyber001/ghost-shell.git
 cd ghost-shell
 pip install -r requirements.txt
+python -m playwright install chromium   # only needed for browser mode (see below)
 ```
 
 Download stockfish from https://stockfishchess.org/download/ and put `stockfish.exe` in the `assets` folder.
@@ -61,6 +62,29 @@ python main.py
 5. Let it do its thing
 
 Press `Q` to quit, or `N` while waiting for the opponent to restart `main.py` for a new game. In manual move prompts, type `new` or `restart` to relaunch. Or slam mouse to corner - theres a failsafe.
+
+---
+
+## Browser mode (keeps your mouse + terminal free)
+
+By default the bot drives your real mouse, which steals focus from the terminal on every move. Set `USE_BROWSER=true` in `.env` to switch to **CDP browser mode**: the bot launches Chrome (your real Google Chrome) as an independent process and injects clicks straight into the page, so the hardware cursor never moves and the terminal keeps focus - you can keep hitting `Enter`/`y`/`r` without clicking back.
+
+```env
+USE_BROWSER=true
+CHESS_URL=https://www.chess.com
+BROWSER_CHANNEL=chrome   # real Chrome; "msedge" or blank (bundled Chromium) also work
+CDP_PORT=9222            # debug port the bot connects to
+```
+
+Then:
+
+1. `python main.py` - a Chrome window opens to chess.com
+2. Log in (saved in `browser_profile/`, so only the first time) and open a game
+3. The bot waits until it sees a board, then plays
+
+**Chrome is yours to close.** Because it's launched detached, closing the bot only *disconnects* - Chrome stays open and you close it whenever you like. The next `python main.py` **reconnects** to that same open Chrome (same login, same game, no profile-lock hassle).
+
+**Keep that browser window visible on screen** (it can be behind the focused terminal, just not minimized or covered) - vision still reads the board from screen pixels. First run needs `python -m playwright install chromium` (used as a fallback if Chrome isn't found).
 
 ---
 
@@ -100,6 +124,9 @@ THINK_TIME_MAX=6.0
 
 PLAYER_SIDE=AUTO         # AUTO / WHITE / BLACK
 
+USE_BROWSER=false        # true = CDP browser clicks (no mouse); false = pyautogui mouse
+CHESS_URL=https://www.chess.com  # page the browser opens in browser mode
+
 QUICK_START=false        # true skips the first FEN/new-game prompt
 DEFAULT_GAME_MODE=RAPID  # BLITZ / RAPID / CLASSIC
 DEFAULT_START_MODE=N     # N = new game, F = resume from FEN
@@ -120,7 +147,8 @@ ghost-shell/
 ├── core/
 │   ├── vision.py        # screen capture, board detection
 │   ├── engine.py        # stockfish wrapper
-│   └── humanizer.py     # mouse movement
+│   ├── humanizer.py     # mouse movement (legacy/pyautogui mode)
+│   └── browser.py       # Playwright/CDP move injection (browser mode)
 ├── ui/
 │   └── overlay.py       # transparent HUD with move arrows
 ├── utils/

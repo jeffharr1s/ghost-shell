@@ -9,8 +9,9 @@ class Colors:
     BLUE = '\033[94m'
     CYAN = '\033[96m'
     GREEN = '\033[92m'
-    WARNING = '\033[93m'
-    FAIL = '\033[91m'
+    WARNING = '\033[93m'   # yellow
+    ORANGE = '\033[38;5;208m'  # 256-color orange (escalation)
+    FAIL = '\033[91m'      # red
     ENDC = '\033[0m'
     BOLD = '\033[1m'
 
@@ -69,6 +70,9 @@ class Logger:
 
     def warning(self, message):
         self._emit(Colors.WARNING, message)
+
+    def orange(self, message):
+        self._emit(Colors.ORANGE, message)
 
     def error(self, message):
         self._emit(Colors.FAIL, message)

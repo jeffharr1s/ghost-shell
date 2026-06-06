@@ -22,6 +22,9 @@ debug_vision.jpg
 logs/
 COPY_THIS_LOG.txt
 
+# Playwright browser profile (persistent login/session)
+browser_profile/
+
 # OS
 .DS_Store
 Thumbs.db
