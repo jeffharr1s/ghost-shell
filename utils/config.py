@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Version (Semantic Versioning)
-APP_VERSION = "0.4.0"  # v0.4.0 - FEN-first startup, restart flow, copy/paste logs
+APP_VERSION = "0.5.0"  # v0.5.0 - overlay black-box fix, Enter=yellow, type/Pylance cleanup (final screen-vision release before CDP browser rebuild)
 
 
 def _env_bool(name, default=False):
