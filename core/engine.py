@@ -24,7 +24,7 @@ class GhostEngine:
 
         self.logger.success(f"Brain loaded. Depth: {ENGINE_DEPTH}, Contempt: {ENGINE_CONTEMPT}")
 
-    def get_human_move(self, fen):
+    def get_human_move(self, fen) -> "str | None":
         """returns best move, but sometimes picks 2nd best to look human"""
         try:
             self.stockfish.set_fen_position(fen)
@@ -49,12 +49,12 @@ class GhostEngine:
                 # 30% chance to be "different" if scores are close
                 if score_diff < 30 and random.random() < 0.3:
                     self.logger.log(f"Style move: {top_moves[1]['Move']} (diff: {score_diff})")
-                    return top_moves[1]['Move']
+                    return str(top_moves[1]['Move'])
             except (TypeError, ValueError):
                 pass  # just use best move if score parsing fails
 
         self.logger.log(f"Best move: {best_move['Move']}")
-        return best_move['Move']
+        return str(best_move['Move'])
 
 if __name__ == "__main__":
     brain = GhostEngine()

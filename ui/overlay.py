@@ -28,6 +28,11 @@ class GhostOverlay:
         self.board_x = 0
         self.board_y = 0
 
+        # Start fully hidden. The window is only mapped while an arrow is on screen.
+        # While withdrawn it is unmapped from the desktop, so it can never show as a
+        # black box over the board nor leak into the ImageGrab screenshot the scanner reads.
+        self.root.withdraw()
+
     def make_click_through(self):
         """windows api magic to let clicks pass through"""
         try:
@@ -54,8 +59,9 @@ class GhostOverlay:
 
     def draw_move_arrow(self, start_coords, end_coords):
         """draws green arrow showing the move"""
-        self.clear()
-        
+        # drop any previous drawing, but don't withdraw - we're about to show
+        self.canvas.delete("all")
+
         # convert screen coords to overlay coords
         sx = start_coords[0] - self.board_x
         sy = start_coords[1] - self.board_y
@@ -64,17 +70,22 @@ class GhostOverlay:
 
         # start circle
         self.canvas.create_oval(sx-10, sy-10, sx+10, sy+10, outline="#00FF00", width=2)
-        
+
         # arrow line
         self.canvas.create_line(sx, sy, ex, ey, fill="#00FF00", width=3, arrow=tk.LAST, arrowshape=(16, 20, 6))
-        
+
         # target box
         self.canvas.create_rectangle(ex-15, ey-15, ex+15, ey+15, outline="#00FF00", width=2)
-        
+
+        # map the window now so the arrow is visible
+        self.root.deiconify()
         self.root.update()
 
     def clear(self):
+        # erase the drawing AND unmap the window so it leaves no footprint on the
+        # desktop (or in screen captures) while the scanner is reading the board
         self.canvas.delete("all")
+        self.root.withdraw()
         self.root.update()
     
     def destroy(self):

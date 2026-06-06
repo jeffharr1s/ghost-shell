@@ -104,6 +104,8 @@ class GhostShell:
         file_idx = chess.FILE_NAMES.index(square_name[0])
         rank_idx = int(square_name[1]) - 1
 
+        if not self.vision.board_location:
+            raise RuntimeError("Board not located yet - run find_board() before requesting square coords")
         bx, by, bw, bh = self.vision.board_location
         sq_size = self.vision.square_size
 
@@ -179,7 +181,7 @@ class GhostShell:
 
         # fallback: manual input (only reached if yellow failed)
         while True:
-            move = input("Opponent's move (e.g. e2e4), 'y'=yellow, 'r'=redo, 'd'=diag, 'f'=FEN, 's'=I moved, 'new'=restart, 'q'=quit: ").strip().lower()
+            move = input("Opponent's move (e.g. e2e4), [Enter]/'y'=yellow, 'r'=redo, 'd'=diag, 'f'=FEN, 's'=I moved, 'new'=restart, 'q'=quit: ").strip().lower()
             if move in ('q', 'quit', 'exit') or move.startswith('q '):
                 self.logger.warning("Quit.")
                 sys.exit(0)
@@ -193,7 +195,9 @@ class GhostShell:
             elif move == 'r':
                 self.redo_last_move()
                 return
-            elif move == 'y':
+            elif move == 'y' or move == '':
+                # Enter (empty) defaults to yellow - it's the action that reliably works
+                # once the board has settled / the overlay's black-box glitch has cleared.
                 self.logger.log("Retrying yellow detection...")
                 if self._try_yellow_once():
                     return

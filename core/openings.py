@@ -75,7 +75,7 @@ OPENINGS_DB = {
 }
 
 
-def detect_opening(board) -> str:
+def detect_opening(board) -> "str | None":
     """
     Detect opening name from current board position.
 
